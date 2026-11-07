@@ -1,5 +1,6 @@
 package com.cloudmusic.app.data.onedrive
 
+import android.util.Log
 import com.cloudmusic.app.data.Prefs
 import com.cloudmusic.app.data.UploadResult
 import kotlinx.coroutines.Dispatchers
@@ -46,6 +47,9 @@ class OneDriveUploader(
 
         private const val GRAPH_ROOT = "${GraphClient.GRAPH}/me/drive/root"
         private const val GRAPH_ITEMS = "${GraphClient.GRAPH}/me/drive/items"
+
+        /** 跟 WebDAV 上传那边共用一个 TAG，一条命令就能把两边的日志都捞出来 */
+        private const val TAG = "CloudMusicUpload"
     }
 
     /**
@@ -68,12 +72,25 @@ class OneDriveUploader(
         if (size <= 0L) {
             return@withContext UploadResult.Failed("文件是空的，传不上去")
         }
-        if (size <= SIMPLE_MAX) {
+        val t0 = System.nanoTime()
+        val result = if (size <= SIMPLE_MAX) {
             simpleUpload(token, folderId, fileName, file, onProgress)
         } else {
             prefs.logAuth("文件 ${file.name} 有 $size 字节，超过 250 MB，改用分块上传会话")
             sessionUpload(token, folderId, fileName, file, onProgress)
         }
+        logUpload(fileName, size, (System.nanoTime() - t0) / 1_000_000, result is UploadResult.Ok)
+        result
+    }
+
+    /** 上传耗时 + 速率。跟 WebDAV 那边的日志一个 TAG，方便一起过滤。 */
+    private fun logUpload(fileName: String, size: Long, ms: Long, ok: Boolean) {
+        val speed = if (ms > 0) size * 1000 / ms else 0L
+        Log.i(
+            TAG,
+            "OneDrive 上传 $fileName $size 字节 ${ms}ms ${speed / 1024}KB/s " +
+                (if (ok) "成功" else "失败")
+        )
     }
 
     // ------------------------------------------------------------ 简单上传

@@ -116,6 +116,14 @@ data class ImportTimings(
     val downloadMs: Long = 0,
     val verifyMs: Long = 0,
     val uploadMs: Long = 0,
+    /**
+     * 传输阶段实际试了几次。
+     *
+     * 夸克直链对「完整请求」和「Range 请求」的处理不一样，
+     * 姿势不对会被 CDN 用 412 拦掉，得换姿势重来。
+     * 次数 > 1 就说明有一部分时间是耗在重试上的。
+     */
+    val attempts: Int = 1,
 ) {
     val totalMs: Long get() = resolveMs + downloadMs + verifyMs + uploadMs
 
@@ -123,6 +131,7 @@ data class ImportTimings(
     fun summary(): String = buildString {
         append("解析 ").append(fmtMs(resolveMs))
         append(" · 下载 ").append(fmtMs(downloadMs))
+        if (attempts > 1) append("（试了 ").append(attempts).append(" 次）")
         if (verifyMs > 0) append(" · 校验 ").append(fmtMs(verifyMs))
         if (uploadMs > 0) append(" · 上传 ").append(fmtMs(uploadMs))
         append(" · 共 ").append(fmtMs(totalMs))
@@ -474,7 +483,9 @@ class MusicSearchRepository(
                 listOf(Attempt(range = false, pcUa = false))
             }
 
+            var attemptUsed = 0
             for ((i, a) in attempts.withIndex()) {
+                attemptUsed = i + 1
                 if (i > 0) delay(900L * i)
                 val request = Request.Builder()
                     .url(url)
@@ -483,10 +494,15 @@ class MusicSearchRepository(
                     .apply { for ((k, v) in effective.extraHeaders) header(k, v) }
                     .apply { if (a.range) header("Range", "bytes=0-") }
                     .build()
+                val tBody = System.nanoTime()
                 try {
-                    val tBody = System.nanoTime()
                     http.newCall(request).execute().use { resp ->
                         if (!resp.isSuccessful) {
+                            Log.i(
+                                TAG,
+                                "下载尝试 $attemptUsed → HTTP ${resp.code} ${elapsedMs(tBody)}ms " +
+                                    "（range=${a.range} pcUa=${a.pcUa}）"
+                            )
                             lastMsg = when (resp.code) {
                                 412 -> "被 CDN 拦了（412），多半是这次请求没带登录 Cookie"
                                 403 -> "直链签名或权限有问题（403）"
@@ -530,7 +546,13 @@ class MusicSearchRepository(
                         val v = verify(effective, dest, resp)
                         verifyMs += elapsedMs(tVerify)
                         downloadMs += elapsedMs(tBody)
-                        val timings = ImportTimings(resolveMs, downloadMs, verifyMs)
+                        val bodyMs = elapsedMs(tBody).coerceAtLeast(1)
+                        Log.i(
+                            TAG,
+                            "下载尝试 $attemptUsed → HTTP ${resp.code} $got/$total 字节 " +
+                                "${bodyMs}ms ${got * 1000 / bodyMs}B/s"
+                        )
+                        val timings = ImportTimings(resolveMs, downloadMs, verifyMs, attempts = attemptUsed)
                         Log.i(TAG, "《${effective.title}》 $timings")
                         if (v is DownloadResult.Failed && v.message.contains("不是音频")) {
                             // 内容不对，换下一种请求姿势再试
@@ -548,6 +570,10 @@ class MusicSearchRepository(
                         }
                     }
                 } catch (e: Exception) {
+                    Log.i(
+                        TAG,
+                        "下载尝试 $attemptUsed → 异常 ${e.javaClass.simpleName} ${elapsedMs(tBody)}ms"
+                    )
                     lastMsg = e.message ?: "网络异常"
                 }
             }
@@ -555,7 +581,7 @@ class MusicSearchRepository(
             DownloadResult.Failed(
                 lastMsg,
                 note,
-                timings = ImportTimings(resolveMs, downloadMs, verifyMs)
+                timings = ImportTimings(resolveMs, downloadMs, verifyMs, attempts = attemptUsed)
             )
         }
 
