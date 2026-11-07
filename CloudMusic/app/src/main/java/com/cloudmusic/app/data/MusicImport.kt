@@ -6,13 +6,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
 import java.net.URLEncoder
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 这条搜索结果来自哪些源。
@@ -217,6 +222,31 @@ class MusicSearchRepository(
 
         /** 128kbps 的 mp3 大约 16KB/秒，用它粗略反推时长 */
         private const val BYTES_PER_SEC = 16000L
+
+        // ---- 并发分段下载 ----
+
+        /**
+         * 每一段多大。
+         *
+         * 4 MB：够大就没必要切更碎（每个 Range 请求都有固定开销），
+         * 32 MB 的歌正好切成 8 段 —— 但段数另有限制，见 [MAX_SEGMENTS]。
+         */
+        private const val SEGMENT_SIZE = 4L * 1024 * 1024
+
+        /**
+         * 最多切几段。
+         *
+         * OkHttp 单个主机默认最多 5 个并发请求，再多就排队了，白切。
+         */
+        private const val MAX_SEGMENTS = 4
+
+        /**
+         * 小于这个体积就不并发分了。
+         *
+         * 开几条连接、拼文件、校验一圈也有开销，
+         * 几 MB 的歌单流下完更快。
+         */
+        private const val MIN_SEGMENT_TOTAL = 8L * 1024 * 1024
 
         /**
          * 网盘来源的 id 前缀。
@@ -469,6 +499,42 @@ class MusicSearchRepository(
             // 直链拿到了，这一段（含分享详情/下载地址/探活/302 升级）到此为止
             resolveMs = elapsedMs(tResolve)
 
+            // ── 先试并发分段下载（只有夸克直链值得试）──────────────────
+            //
+            // 单流下载被夸克 CDN 限在 1 MB/s —— 实测三首歌（8.2MB / 26.2MB / 31.8MB）
+            // 速率都是 1.01~1.04 MB/s，跟文件大小无关，是**单连接**的天花板。
+            // 32MB 的歌就这么慢慢磨，要 32 秒。
+            //
+            // CDN 是支持 Range 的（响应 206），所以把文件切成几段同时下，
+            // 每段一条连接，整体吞吐能翻倍。
+            //
+            // 走不通就退回下面的单流 —— 不能为了快把成功率换掉。
+            if (isCloud) {
+                val tSeg = System.nanoTime()
+                val segOk = downloadSegmented(url, effective, dest, onProgress)
+                if (segOk) {
+                    downloadMs += elapsedMs(tSeg)
+                    val tVerify = System.nanoTime()
+                    val v = verify(effective, dest, null)
+                    verifyMs += elapsedMs(tVerify)
+                    val timings = ImportTimings(resolveMs, downloadMs, verifyMs, attempts = 1)
+                    Log.i(
+                        TAG,
+                        "《${effective.title}》并发分段下载完成 ${downloadMs}ms " +
+                            "${dest.length() / 1024}KB ${dest.length() * 1000 / downloadMs.coerceAtLeast(1)}B/s"
+                    )
+                    return@withContext when (v) {
+                        is DownloadResult.Ok -> v.copy(timings = timings)
+                        is DownloadResult.Partial ->
+                            if (note.isNotBlank()) v.copy(note = note, timings = timings)
+                            else v.copy(timings = timings)
+                        is DownloadResult.Failed -> v.copy(timings = timings)
+                    }
+                }
+                // 分段这条路没走通 —— 清掉半截文件，老老实实单流下
+                dest.delete()
+            }
+
             // 夸克那边对「完整请求」和「Range 请求」
             // 的处理不一样：完整请求有可能拿回来的不是音频字节（实测踩过），
             // 而 Range 请求是稳的。所以夸克直链先按 Range 姿势试，不行再换姿势。
@@ -584,6 +650,188 @@ class MusicSearchRepository(
                 timings = ImportTimings(resolveMs, downloadMs, verifyMs, attempts = attemptUsed)
             )
         }
+
+    /**
+     * 分段下载的进度账本。
+     *
+     * 每段一个计数器 —— 某段重试时只把它自己清零，
+     * 不会把别的段已经下好的进度也一起退回去。
+     */
+    private class SegProgress(val count: Int) {
+        private val segs = Array(count) { AtomicLong(0) }
+        fun reset(i: Int) { segs[i].set(0) }
+        fun add(i: Int, n: Long) { segs[i].addAndGet(n) }
+        fun total(): Long = segs.sumOf { it.get() }
+    }
+
+    /**
+     * 并发分段下载。
+     *
+     * 先用一个 1 字节的 Range 请求问清楚文件总共多大
+     * （`Content-Range` 里带总长），再把文件平分成几段，
+     * 每段一条连接同时下，各写各的位置。
+     *
+     * @return true = 整个文件下齐了；false = 这条路走不通，调用方该退回单流
+     */
+    private suspend fun downloadSegmented(
+        url: String,
+        effective: MusicHit,
+        dest: File,
+        onProgress: ((got: Long, total: Long) -> Unit)?,
+    ): Boolean {
+        // ── 先问总长 ────────────────────────────────────
+        val probeReq = Request.Builder()
+            .url(url)
+            .header("User-Agent", UA_PC)
+            .header("Referer", "https://pan.quark.cn/")
+            .apply { for ((k, v) in effective.extraHeaders) header(k, v) }
+            .header("Range", "bytes=0-0")
+            .build()
+        val total = try {
+            http.newCall(probeReq).execute().use { resp ->
+                if (resp.code != 206) {
+                    Log.i(TAG, "并发下载：探测返回 HTTP ${resp.code}，这条直链不支持分段")
+                    return false
+                }
+                val cr = resp.header("Content-Range")
+                // 形如 "bytes 0-0/33299070"
+                val t = cr?.substringAfterLast('/')?.trim()?.toLongOrNull()
+                if (t == null || t <= 0L) {
+                    Log.i(TAG, "并发下载：Content-Range 读不出总长（$cr）")
+                    return false
+                }
+                t
+            }
+        } catch (e: Exception) {
+            Log.i(TAG, "并发下载：探测异常 ${e.javaClass.simpleName} ${e.message}")
+            return false
+        }
+        if (total < MIN_SEGMENT_TOTAL) {
+            Log.i(TAG, "并发下载：才 ${total / 1024}KB，太小，不值得并发")
+            return false
+        }
+
+        val segCount = minOf(
+            MAX_SEGMENTS.toLong(),
+            (total + SEGMENT_SIZE - 1) / SEGMENT_SIZE
+        ).toInt().coerceAtLeast(1)
+        val segSize = (total + segCount - 1) / segCount
+        Log.i(
+            TAG,
+            "并发下载：${total / 1024}KB 切成 $segCount 段，每段 ${segSize / 1024}KB"
+        )
+
+        dest.parentFile?.mkdirs()
+        val raf = java.io.RandomAccessFile(dest, "rw")
+        try {
+            // 先把文件撑到总长（稀疏文件，写满了就是完整的）
+            raf.setLength(total)
+            val channel = raf.channel
+            val progress = SegProgress(segCount)
+            val failure = java.util.concurrent.atomic.AtomicReference<String?>(null)
+
+            coroutineScope {
+                repeat(segCount) { i ->
+                    launch {
+                        val start = i * segSize
+                        val end = minOf(start + segSize, total) - 1
+                        if (start > end) return@launch
+                        val err = fetchSegment(
+                            url, effective, channel, start, end,
+                            i, progress, total, onProgress
+                        )
+                        if (err != null) failure.compareAndSet(null, err)
+                    }
+                }
+            }
+
+            val err = failure.get()
+            if (err != null) {
+                Log.i(TAG, "并发下载没成：$err —— 退回单流")
+                return false
+            }
+            // 每段都自己核对过字节数（差一个字节都会算失败），这里可以放心当它下齐了
+            return true
+        } finally {
+            runCatching { raf.close() }
+        }
+    }
+
+    /**
+     * 下一段音频，写到文件的对应位置。
+     *
+     * @return null = 这一段下齐了；非 null = 出错的原因
+     */
+    private suspend fun fetchSegment(
+        url: String,
+        effective: MusicHit,
+        channel: FileChannel,
+        start: Long,
+        end: Long,
+        index: Int,
+        progress: SegProgress,
+        total: Long,
+        onProgress: ((Long, Long) -> Unit)?,
+    ): String? {
+        var lastErr = "未知错误"
+        repeat(3) { attempt ->
+            if (attempt > 0) delay(600L * attempt)
+            // 这一段重新来过，进度也重新算
+            progress.reset(index)
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", UA_PC)
+                .header("Referer", "https://pan.quark.cn/")
+                .apply { for ((k, v) in effective.extraHeaders) header(k, v) }
+                .header("Range", "bytes=$start-$end")
+                .build()
+            try {
+                http.newCall(req).execute().use { resp ->
+                    if (resp.code != 206) {
+                        lastErr = "HTTP ${resp.code}"
+                        return@use
+                    }
+                    // 服务器要是没按 Range 回应（返回了别的区间），
+                    // 写下去就错位了 —— 这时候宁可这一段作废重来。
+                    val cr = resp.header("Content-Range")
+                    if (cr != null) {
+                        val from = cr.substringAfter("bytes ", "").substringBefore('-').trim().toLongOrNull()
+                        if (from != null && from != start) {
+                            lastErr = "服务器回了错误的区间（$from ≠ $start）"
+                            return@use
+                        }
+                    }
+                    val body = resp.body ?: run {
+                        lastErr = "没有内容"
+                        return@use
+                    }
+                    val buf = ByteArray(64 * 1024)
+                    var pos = start
+                    body.byteStream().use { input ->
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n < 0) break
+                            val bb = ByteBuffer.wrap(buf, 0, n)
+                            // 带 position 写的 FileChannel 是线程安全的，
+                            // 几段同时写各写各的位置，互不干扰。
+                            while (bb.hasRemaining()) channel.write(bb, pos)
+                            pos += n
+                            progress.add(index, n.toLong())
+                            onProgress?.invoke(progress.total().coerceAtMost(total), total)
+                        }
+                    }
+                    if (pos - 1 != end) {
+                        lastErr = "只下了 ${pos - start}/${end - start + 1} 字节"
+                        return@use
+                    }
+                    return null
+                }
+            } catch (e: Exception) {
+                lastErr = "${e.javaClass.simpleName}: ${e.message}"
+            }
+        }
+        return "$start-$end 段失败（$lastErr）"
+    }
 
     /**
      * 把「下歌吧 → 夸克网盘」这条链路走完，拿到带签名的直链。
