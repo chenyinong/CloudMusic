@@ -1,6 +1,8 @@
 package com.cloudmusic.app.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,8 +23,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Refresh
@@ -47,12 +52,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.cloudmusic.app.data.ProviderKind
 import com.cloudmusic.app.data.Track
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun LibraryScreen(
     vm: AppViewModel,
@@ -67,8 +75,12 @@ fun LibraryScreen(
     onOpenSettings: () -> Unit,
     onOpenPlayer: () -> Unit
 ) {
-    // 排序：0 默认（网盘顺序）、1 按标题、2 按歌手 —— 点操作行右侧图标循环切换
+    // 排序：0 默认（网盘顺序）、1 按标题、2 按歌手 —— 点操作行右侧胶囊循环切换
     var sortMode by remember { mutableStateOf(0) }
+    // 头卡上的统计：歌手数按列表实时算，不额外查库
+    val artistCount = remember(tracks) {
+        tracks.map { it.artist.trim() }.filter { it.isNotBlank() }.distinct().size
+    }
     val filtered = remember(tracks, query, providerFilter, sortMode) {
         val byProvider = if (providerFilter == null) tracks
         else tracks.filter { it.provider == providerFilter }
@@ -116,24 +128,41 @@ fun LibraryScreen(
             )
         }
     ) { padding ->
-        Column(
+        // 整页一个滚动列表：头卡随内容滑走，搜索框吸顶，列表占满剩余空间。
+        // 这样第一屏有视觉重心，往下滚又不浪费可视区域。
+        LazyColumn(
             Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .padding(padding),
+            contentPadding = PaddingValues(bottom = LocalScreenBottomPad.current)
         ) {
-            // 搜索框独占一行。
-            // 之前跟两个按钮挤在一行，OutlinedTextField 有 280dp 的最小宽度，
-            // 窄屏上按钮会被推出屏幕外，所以改成上下两行。
-            SearchField(
-                value = query,
-                onValueChange = onQueryChange,
-                placeholder = "搜索歌曲 / 歌手 / 专辑",
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
-            )
+            item(key = "hero") {
+                LibraryHero(
+                    trackCount = tracks.size,
+                    providerCount = providers.size,
+                    artistCount = artistCount
+                )
+            }
 
-            // QQ 收藏页那一行：绿圆播放 + 全部播放(N) + 右侧排序
+            stickyHeader(key = "search") {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.background)
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    SearchField(
+                        value = query,
+                        onValueChange = onQueryChange,
+                        placeholder = "搜索歌曲 / 歌手 / 专辑",
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+
+            item(key = "controls") {
+                Column {
+            // 播放全部 + 排序方式
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -142,7 +171,7 @@ fun LibraryScreen(
             ) {
                 Box(
                     Modifier
-                        .size(30.dp)
+                        .size(36.dp)
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary)
                         .clickable {
@@ -157,25 +186,42 @@ fun LibraryScreen(
                         Icons.Filled.PlayArrow,
                         contentDescription = "全部播放",
                         tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(19.dp)
                     )
                 }
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    "全部播放(${filtered.size})",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Medium
-                )
-                Spacer(Modifier.weight(1f))
-                IconButton(onClick = { sortMode = (sortMode + 1) % 3 }) {
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "播放全部",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "${filtered.size} 首歌曲",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                // 带文字的排序胶囊：光一个图标看不出当前按什么排
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .clickable { sortMode = (sortMode + 1) % 3 }
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Icon(
                         Icons.Filled.SwapVert,
-                        contentDescription = when (sortMode) {
-                            0 -> "排序：默认"
-                            1 -> "排序：按标题"
-                            else -> "排序：按歌手"
-                        },
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        contentDescription = "切换排序",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        listOf("默认", "按标题", "按歌手")[sortMode],
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -195,12 +241,13 @@ fun LibraryScreen(
                         Text(
                             label,
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (selected) MaterialTheme.colorScheme.primary
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (selected) MaterialTheme.colorScheme.onPrimary
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(9.dp))
                                 .background(
-                                    if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                    if (selected) MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.surfaceVariant
                                 )
                                 .clickable { onProviderFilterChange(id) }
@@ -229,35 +276,48 @@ fun LibraryScreen(
                 }
             }
 
-            if (filtered.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        if (tracks.isEmpty()) "还没有歌曲，点右上角刷新扫描网盘" else "没有匹配的歌曲",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
-            } else {
-                LazyColumn(
-                    Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = LocalScreenBottomPad.current)
-                ) {
-                    itemsIndexed(filtered, key = { _, t -> t.key }) { idx, track ->
-                        TrackRow(
-                            index = idx + 1,
-                            track = track,
-                            showProvider = providers.size > 1,
-                            playing = vm.player.currentTrack?.key == track.key,
-                            onClick = {
-                                vm.player.play(filtered, filtered.indexOf(track))
-                                onOpenPlayer()
-                            },
-                            onEnqueue = { vm.player.enqueue(track) },
-                            onShowInfo = { infoTrack = track }
+            }
+
+            if (filtered.isEmpty()) {
+                item(key = "empty") {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = 56.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            Icons.Filled.MusicNote,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                            modifier = Modifier.size(40.dp)
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            if (tracks.isEmpty()) "还没有歌曲，点右上角刷新扫描网盘" else "没有匹配的歌曲",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    // 底部留白由 Root 统一处理（迷你播放器 + 导航栏）
-                    item { Spacer(Modifier.height(16.dp)) }
                 }
+            } else {
+                itemsIndexed(filtered, key = { _, t -> t.key }) { idx, track ->
+                    TrackRow(
+                        index = idx + 1,
+                        track = track,
+                        showProvider = providers.size > 1,
+                        playing = vm.player.currentTrack?.key == track.key,
+                        onClick = {
+                            vm.player.play(filtered, filtered.indexOf(track))
+                            onOpenPlayer()
+                        },
+                        onEnqueue = { vm.player.enqueue(track) },
+                        onShowInfo = { infoTrack = track }
+                    )
+                }
+                // 底部留白由 Root 统一处理（迷你播放器 + 导航栏）
+                item { Spacer(Modifier.height(16.dp)) }
             }
         }
     }
@@ -292,6 +352,98 @@ fun LibraryScreen(
                 TextButton(onClick = { pendingDelete = null }) { Text("取消") }
             }
         )
+    }
+}
+
+/**
+ * 曲库页的概览头卡 —— 一打开就有视觉重心。
+ *
+ * 深灰渐变 + 大数字 + 极淡圆环装饰，不挂投影（浅灰底上投影会显脏）。
+ * 颜色不跟主题主色走，深浅模式都保留这块「深色名片」的对比。
+ */
+@Composable
+private fun LibraryHero(trackCount: Int, providerCount: Int, artistCount: Int) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .height(136.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(Brush.linearGradient(listOf(Color(0xFF23272E), Color(0xFF3D444E))))
+    ) {
+        // 装饰：两个半透明圆环 + 一个淡到几乎看不见的均衡器图标
+        Box(
+            Modifier
+                .align(Alignment.TopEnd)
+                .offset(x = 30.dp, y = (-44).dp)
+                .size(150.dp)
+                .border(1.dp, Color.White.copy(alpha = 0.10f), CircleShape)
+        )
+        Box(
+            Modifier
+                .align(Alignment.BottomEnd)
+                .offset(x = 26.dp, y = 40.dp)
+                .size(92.dp)
+                .border(1.dp, Color.White.copy(alpha = 0.07f), CircleShape)
+        )
+        Icon(
+            Icons.Filled.GraphicEq,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.08f),
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .size(92.dp)
+                .padding(end = 8.dp)
+        )
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 20.dp, vertical = 18.dp)
+        ) {
+            Text(
+                "MY LIBRARY",
+                style = MaterialTheme.typography.labelMedium,
+                letterSpacing = 1.4.sp,
+                color = Color.White.copy(alpha = 0.62f)
+            )
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    "$trackCount",
+                    fontSize = 42.sp,
+                    lineHeight = 46.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    "首歌曲",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.72f),
+                    modifier = Modifier.padding(bottom = 7.dp)
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "${providerCount} 个网盘",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White.copy(alpha = 0.78f)
+                )
+                Spacer(Modifier.width(14.dp))
+                Box(
+                    Modifier
+                        .size(3.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.32f))
+                )
+                Spacer(Modifier.width(14.dp))
+                Text(
+                    "${artistCount} 位歌手",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White.copy(alpha = 0.78f)
+                )
+            }
+        }
     }
 }
 
