@@ -18,7 +18,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GraphicEq
@@ -62,33 +61,15 @@ fun DiscPage(
             (maxWidth - 84.dp).coerceIn(160.dp, 300.dp),
         )
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            // QQ 音乐同款：白色方圆形大卡 + 大柔和投影（纯阴影，不要边框）
+            // 白色方圆卡 + 克制的投影：24dp 的投影落在浅底上会显脏。
+            // 右下角那个「Q」圆标只是遗留装饰，和下面这条来源胶囊信息重复，去掉。
             Surface(
                 shape = RoundedCornerShape(28.dp),
                 color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 24.dp
+                shadowElevation = 10.dp
             ) {
-                Box {
-                    Box(Modifier.padding(22.dp)) {
-                        VinylDisc(title = title, rotating = rotating, discSize = disc.value.toInt())
-                    }
-                    // 卡片右下角的小绿标
-                    Box(
-                        Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(14.dp)
-                            .size(22.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            "Q",
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.labelSmall
-                        )
-                    }
+                Box(Modifier.padding(22.dp)) {
+                    VinylDisc(title = title, rotating = rotating, discSize = disc.value.toInt())
                 }
             }
             Spacer(Modifier.height(14.dp))
