@@ -83,5 +83,10 @@ dependencies {
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
+    // 毛玻璃：身后内容实时模糊（API 31+ 完整效果，低版本自动退化成半透明）
+    // 0.9 是最后兼容 Compose 1.6 的版本线
+    implementation("dev.chrisbanes.haze:haze:0.9.0-rc03")
+    implementation("dev.chrisbanes.haze:haze-materials:0.9.0-rc03")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

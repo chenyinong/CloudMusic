@@ -50,6 +50,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeChild
+import dev.chrisbanes.haze.materials.HazeMaterials
 import kotlinx.coroutines.delay
 
 /**
@@ -71,6 +74,8 @@ fun MiniPlayerBar(
     onOpenQueue: () -> Unit,
     modifier: Modifier = Modifier,
     dlna: DlnaViewModel? = null,
+    /** 毛玻璃模糊源（Root 提供内容区的 HazeState）。null 时退化为普通白卡。 */
+    hazeState: HazeState? = null,
 ) {
     val casting = dlna?.casting
     val title = if (casting != null) dlna.castTitle else player.currentTitle
@@ -114,11 +119,9 @@ fun MiniPlayerBar(
         }
     }
 
-    // 磨砂玻璃：半透明底色 + 内侧高光描边（身后内容会透出来，滚动时玻璃感更足）。
-    // 真·背景实时模糊要 API 31+（RenderEffect）/ haze 库；这里用「半透明 + 描边」达到等效观感，
-    // 全版本可见。深色模式换成深玻璃，否则白玻璃在深底上会发灰发脏。
+    // 磨砂玻璃：背后内容实时模糊（haze，API 31+ 完整效果；低版本退化成半透明），
+    // 内侧 1dp 高光描边出玻璃边。深浅模式 HazeMaterials 按背景色自动配。
     val isDark = isSystemInDarkTheme()
-    val glassTint = if (isDark) Color(0xFF1C1F26) else Color.White
     val glassStroke = if (isDark) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.6f)
     Surface(
         // 浮岛：左右和底部留边距，四角都圆，盖在内容上面像一块悬浮的玻璃卡片
@@ -126,8 +129,21 @@ fun MiniPlayerBar(
             .fillMaxWidth()
             .padding(horizontal = 10.dp)
             .padding(bottom = 8.dp)
+            .then(
+                if (hazeState != null) {
+                    Modifier.hazeChild(
+                        state = hazeState,
+                        shape = RoundedCornerShape(18.dp),
+                        style = HazeMaterials.thin(
+                            containerColor = MaterialTheme.colorScheme.background
+                        ),
+                    )
+                } else {
+                    Modifier
+                }
+            )
             .border(1.dp, glassStroke, RoundedCornerShape(18.dp)),
-        color = glassTint.copy(alpha = 0.32f),
+        color = Color.Transparent,
         // 色调叠加会发绿，这里只留投影
         tonalElevation = 0.dp,
         shadowElevation = 12.dp,
@@ -138,7 +154,7 @@ fun MiniPlayerBar(
                 Modifier
                     .fillMaxWidth()
                     .height(2.dp)
-                    .background(glassTint.copy(alpha = 0.45f))
+                    .background(Color.White.copy(alpha = if (isDark) 0.10f else 0.30f))
             ) {
                 Box(
                     Modifier

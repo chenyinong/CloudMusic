@@ -22,6 +22,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cloudmusic.app.data.ProviderKind
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.haze
 
 @Composable
 fun CloudMusicRoot(vm: AppViewModel) {
@@ -100,6 +102,9 @@ fun CloudMusicRoot(vm: AppViewModel) {
     // 否则底下会空出一块（外层是浅色底，深色的播放页下面就露出一条白）。
     val fullScreen = vm.screen == Screen.PLAYER || vm.screen == Screen.LOGIN
 
+    // 毛玻璃模糊源：mini 播放器要模糊的就是这一块背后的内容
+    val hazeState = remember { HazeState() }
+
     Box(
         Modifier
             .fillMaxSize()
@@ -118,6 +123,7 @@ fun CloudMusicRoot(vm: AppViewModel) {
         Modifier
             .fillMaxSize()
             .padding(bottom = bottomPad)
+            .haze(hazeState)
     ) {
     when (vm.screen) {
         Screen.LOGIN -> if (vm.loginTarget == ProviderKind.ONEDRIVE) {
@@ -263,6 +269,7 @@ fun CloudMusicRoot(vm: AppViewModel) {
                     MiniPlayerBar(
                         player = conn,
                         dlna = dlnaVm,
+                        hazeState = hazeState,
                         // 点迷你条 = 想看这句歌词，直接翻到歌词页
                         onOpenPlayer = {
                             openAtLyrics = true
