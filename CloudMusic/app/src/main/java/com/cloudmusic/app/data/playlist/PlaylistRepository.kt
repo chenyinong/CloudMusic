@@ -1,5 +1,6 @@
 package com.cloudmusic.app.data.playlist
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -206,14 +207,15 @@ class PlaylistRepository(private val http: OkHttpClient) {
         var begin = 0
         var guard = 0
 
-        while (guard++ < 40) {
+        val seen = mutableSetOf<String>()
+        while (guard++ < 200) {
             val param = JSONObject()
                 .put("disstid", numericId)
                 .put("enc_host_uin", "")
                 .put("tag", 1)
                 .put("userinfo", 1)
                 .put("song_begin", begin)
-                .put("song_num", 100)
+                .put("song_num", 300)
                 .put("orderlist", 1)
             val body = JSONObject()
                 .put("comm", JSONObject().put("cv", "10020000"))
@@ -240,6 +242,7 @@ class PlaylistRepository(private val http: OkHttpClient) {
             val list = data.optJSONArray("songlist") ?: break
             if (list.length() == 0) break
 
+            val before = tracks.size
             for (i in 0 until list.length()) {
                 val s = list.optJSONObject(i) ?: continue
                 val mid = s.optString("songmid").ifBlank { s.optString("mid") }
@@ -253,9 +256,12 @@ class PlaylistRepository(private val http: OkHttpClient) {
                             ?.takeIf { it.isNotBlank() }?.let { singers.add(it) }
                     }
                 }
+                val key = if (mid.isBlank()) "qq:$begin:$i" else "qq:$mid"
+                // 同一首歌可能因分页边界被重复返回，去重一下
+                if (!seen.add(key)) continue
                 tracks.add(
                     PlaylistTrack(
-                        key = if (mid.isBlank()) "qq:$begin:$i" else "qq:$mid",
+                        key = key,
                         title = title,
                         artist = singers.joinToString(" / "),
                         album = s.optJSONObject("album")?.optString("name").orEmpty(),
@@ -266,9 +272,17 @@ class PlaylistRepository(private val http: OkHttpClient) {
                 )
             }
 
+            Log.i(
+                "CloudMusicPlaylist",
+                "QQ 歌单 $disstid：第 ${guard} 页拉到 ${list.length()} 首，累计 ${tracks.size}" +
+                    if (total > 0) "（服务端称共 $total 首）" else ""
+            )
+
             begin += list.length()
-            if (!data.optBoolean("hasmore", false)) break
-            if (total > 0 && begin >= total) break
+            // 不再用 hasmore / total_song_num 提前收尾 —— 实测这俩字段不准时会
+            // 只拉到一页（30 首）就停。只认两种真正的「到底」信号：
+            // 1) 本页一首歌都没返回（上面已 break）；2) 本页没带来任何新歌（在打转）。
+            if (tracks.size == before) break
         }
 
         if (tracks.isEmpty()) throw PlaylistException("这张歌单里没拉到歌，可能需要登录")

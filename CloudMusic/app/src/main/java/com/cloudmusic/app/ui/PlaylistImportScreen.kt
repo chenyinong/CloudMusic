@@ -192,18 +192,8 @@ fun PlaylistImportScreen(
         }
 
         LazyColumn(Modifier.weight(1f)) {
-            itemsIndexed(pl.tracks.take(30), key = { _, t -> t.key }) { idx, t ->
+            itemsIndexed(pl.tracks, key = { _, t -> t.key }) { idx, t ->
                 PlaylistPreviewRow(t, idx + 1)
-            }
-            if (pl.tracks.size > 30) {
-                item {
-                    Text(
-                        "… 还有 ${pl.tracks.size - 30} 首",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                    )
-                }
             }
             item { Spacer(Modifier.height(8.dp)) }
         }
