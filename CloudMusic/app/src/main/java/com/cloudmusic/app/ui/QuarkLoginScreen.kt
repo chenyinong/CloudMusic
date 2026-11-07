@@ -251,26 +251,16 @@ private fun harvestCookies(cm: CookieManager): String {
  *
  * `clearQuark()` 只清了 App 自己存的 `SharedPreferences` cookie，
  * 但 WebView 的全局 cookie（[CookieManager]）没动 —— 退出登录再进登录页
- * 时，网页还认得老账号，用户就没法换号了。
- * 这里把夸克几个域的 cookie 逐个置过期清掉。
+ * 时，页面还认得老账号，会立刻自动重新登录回 App，表现就是「还是已登录」，
+ * 用户根本没机会输入新账号。
+ *
+ * 夸克的会话 cookie 常挂在 `.quark.cn` 顶级域上，逐个子域置过期删不干净，
+ * 所以这里直接把 WebView 的 cookie 整体清掉。本 App 的 WebView 只用于
+ * 夸克登录，没有别的网站依赖它，清全局不会有副作用。
  */
 private fun clearQuarkWebViewCookies() {
     val cm = CookieManager.getInstance()
-    val domains = arrayOf(
-        "https://pan.quark.cn/",
-        "https://quark.cn/",
-        "https://h5.sm.cn/",
-        "https://drive.quark.cn/",
-        "https://drive-pc.quark.cn/"
-    )
-    for (u in domains) {
-        val raw = kotlin.runCatching { cm.getCookie(u) }.getOrNull() ?: continue
-        for (part in raw.split(';')) {
-            val name = part.trim().substringBefore('=').trim()
-            if (name.isNotBlank()) {
-                cm.setCookie(u, "$name=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/")
-            }
-        }
-    }
+    @Suppress("DEPRECATION")
+    cm.removeAllCookies(android.webkit.ValueCallback<Boolean> { })
     cm.flush()
 }

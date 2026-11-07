@@ -1,6 +1,7 @@
 package com.cloudmusic.app.ui
 
 import android.app.Application
+import android.webkit.CookieManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -236,6 +237,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         prefs.clearQuark()
         quarkLoggedIn = false
         quarkAccount = ""
+        // 退出即把 WebView 里的夸克登录态也清掉（否则下次进登录页还认得老账号，
+        // 会立刻自动重新登录回 App，看着就像「没退出干净」）。
+        val cm = CookieManager.getInstance()
+        @Suppress("DEPRECATION")
+        cm.removeAllCookies(android.webkit.ValueCallback<Boolean> { })
+        cm.flush()
     }
 
     fun changeOneDriveScopeMode(mode: String) {
