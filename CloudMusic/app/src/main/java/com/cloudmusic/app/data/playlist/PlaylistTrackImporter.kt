@@ -88,7 +88,7 @@ class PlaylistTrackImporter(private val musicSearch: MusicSearchRepository) {
         }
         onPhase("已导入")
         val entryId = (up as UploadResult.Ok).entryId
-        return Result.Done(fileName, buildTrack(provider, entryId, fileName, track))
+        return Result.Done(fileName, buildTrack(provider, entryId, fileName, track, dir, ok.bytes))
     }
 
     /**
@@ -96,18 +96,29 @@ class PlaylistTrackImporter(private val musicSearch: MusicSearchRepository) {
      *
      * 跟扫描出来的 Track 保持同一套 key 规则（`provider:id`），
      * 这样它跟以后扫描出来的同一条能对上，播放队列不会重复。
+     *
+     * @param dir 导入时选的目标目录。OneDrive 的 entryId 是 item id、不含路径，
+     *   没法从它解析出位置，所以直接用用户选的目录当 folder；
+     *   WebDAV 的 entryId 本身就是路径，照旧从它解析。
+     * @param size 真实文件大小（来自下载结果），否则信息页显示不出来。
      */
     private fun buildTrack(
         provider: CloudProvider,
         entryId: String,
         fileName: String,
         src: PlaylistTrack,
+        dir: String,
+        size: Long,
     ): Track {
         val oneDrive = provider.kind == ProviderKind.ONEDRIVE
         val name = if (oneDrive) fileName else DavXmlParser.nameFromHref(entryId)
         val parsed = AudioTypes.parseTitle(name)
-        val parent = if (oneDrive) "" else entryId.trimEnd('/').substringBeforeLast('/', "")
-        val folderName = if (oneDrive) "" else DavXmlParser.nameFromHref(parent)
+        val parent = if (oneDrive) dir else entryId.trimEnd('/').substringBeforeLast('/', "")
+        val folderName = if (oneDrive) {
+            dir.substringAfterLast('/').ifBlank { provider.kind.shortLabel }
+        } else {
+            DavXmlParser.nameFromHref(parent)
+        }
         return Track(
             key = "${provider.kind.id}:$entryId",
             id = entryId,
@@ -117,7 +128,7 @@ class PlaylistTrackImporter(private val musicSearch: MusicSearchRepository) {
             artist = src.artist.ifBlank { parsed.first },
             album = src.album.ifBlank { folderName },
             folder = parent,
-            size = 0,
+            size = size,
             mime = AudioTypes.mimeOf(name),
             durationSec = src.durationSec.toDouble(),
             provider = provider.kind.id,
