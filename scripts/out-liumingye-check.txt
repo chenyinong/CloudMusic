@@ -1,0 +1,58 @@
+=== liumingye 搜索：克卜勒 孙燕姿 ===
+状态 200
+命中 19 条
+  - id=cmufe0co902iqasvguogkfo90 | 克卜勒 | 孙燕姿 | 克卜勒 | ["夸克MP3","夸克FLAC"]
+  - id=cms5c0j6u02xpw0vgsw6qe8l0 | 克卜勒 | 孙燕姿 |  | ["夸克WAV","夸克MP3"]
+  - id=cmsbqdm8r03kmosvg6podr94a | 克卜勒 | 孙燕姿 |  | ["夸克网盘"]
+  - id=cms9pberh00h5xovg1wxofqrv | 克卜勒 | 孙燕姿 |  | ["夸克FLAC"]
+  - id=cms8zut0l0e768ovgt12bknc4 | 克卜勒 | 孙燕姿 |  | ["夸克网盘"]
+  - id=cmtn1oakw04ulkovgwyvyetsi | 围绕 | 孙燕姿 | 克卜勒 | ["夸克MP3","夸克FLAC"]
+  - id=cmspx46x601bs48vgaygcnobl | 渴 | 孙燕姿 | 克卜勒 | ["夸克MP3","夸克FLAC"]
+  - id=cmu5erfm506tncgvg1hgmdvfg | 错觉 | 孙燕姿 | 克卜勒 | ["夸克MP3","夸克FLAC"]
+  - id=cmqhacp71hsys6bxth5fdojx | 克卜勒 | 孙燕姿2014 |  | ["百度云"]
+  - id=cmrzmijoe03qtgkvgenowkzxn | 克卜勒 | 孙燕姿2014 |  | ["夸克网盘"]
+
+=== detail cmufe0co902iqasvguogkfo90（克卜勒 - 孙燕姿）===
+  downloads 2 条，lyrics 有
+   · [夸克MP3] https://pan.quark.cn/s/dc3422ab6182
+   · [夸克FLAC] https://pan.quark.cn/s/22206fd9554d
+   分享里 1 项：
+     · 克卜勒-孙燕姿(1).mp3 | size=9963296 | duration=249 | dir=undefined | fid=8655a07d25da44eda01b0acfa230d663
+   分享里 1 项：
+     · 克卜勒-孙燕姿.flac | size=26919403 | duration=249 | dir=undefined | fid=16c271ce1ece483a9c1fb2f132d8e346
+
+=== detail cms5c0j6u02xpw0vgsw6qe8l0（克卜勒 - 孙燕姿）===
+  downloads 2 条，lyrics 有
+   · [夸克WAV] https://pan.quark.cn/s/7039c1cfe1b9
+   · [夸克MP3] https://pan.quark.cn/s/d1ce552aaab5
+   分享里 1 项：
+     · 孙燕姿-克卜勒.wav | size=44064338 | duration=249 | dir=undefined | fid=36c857f72c084294805e768bd20ffe78
+   分享里 1 项：
+     · 孙燕姿-克卜勒.mp3 | size=10100734 | duration=249 | dir=undefined | fid=3e3ee2c711a64f23a2b605cfd5e48808
+
+=== detail cmsbqdm8r03kmosvg6podr94a（克卜勒 - 孙燕姿）===
+  downloads 1 条，lyrics 有
+   · [夸克网盘] https://pan.quark.cn/s/03d51ab1f0cc
+   分享里 1 项：
+     · 285(1) | size=0 | duration=0 | dir=undefined | fid=28cab617f7b143218335e5d848be5f81
+
+=== detail cms9pberh00h5xovg1wxofqrv（克卜勒 - 孙燕姿）===
+  downloads 1 条，lyrics 有
+   · [夸克FLAC] https://pan.quark.cn/s/99395c505c12
+   分享里 1 项：
+     · 克卜勒-孙燕姿.flac | size=22425301 | duration=251 | dir=undefined | fid=6d0bb876966d47feb04393cdbfff797a
+
+=== detail cms8zut0l0e768ovgt12bknc4（克卜勒 - 孙燕姿）===
+  downloads 1 条，lyrics 有
+   · [夸克网盘] https://pan.quark.cn/s/bd1691d3c290
+   分享里 1 项：
+     · 285 | size=0 | duration=0 | dir=undefined | fid=9e23da51876a474fa4e77c9f9381c64c
+
+=== detail cmtn1oakw04ulkovgwyvyetsi（围绕 - 孙燕姿）===
+  downloads 2 条，lyrics 有
+   · [夸克MP3] https://pan.quark.cn/s/f6c0214ce297
+   · [夸克FLAC] https://pan.quark.cn/s/bc4a038c2b1e
+   分享里 1 项：
+     · 围绕-孙燕姿.mp3 | size=7903739 | duration=198 | dir=undefined | fid=b0e6f5663434422f80fab4c8de838801
+   分享里 1 项：
+     · 围绕-孙燕姿.flac | size=21640455 | duration=198 | dir=undefined | fid=514dce4f04e74b80afc7b4e027b0ccab

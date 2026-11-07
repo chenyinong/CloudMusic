@@ -1,0 +1,57 @@
+liumingye 命中同名同歌手：8 条
+
+=== 克卜勒-孙燕姿(1).mp3 (fid=8655a07d25da44eda01b0acfa230d663) ===
+  直链：https://dl-guest-sz-u.drive.quark.cn/gXlDe2XC/766279446/66573e84967b2b308ca045a4b74763885696ddd9/66573e84603c3…
+  [完整下载] HTTP 412  收到 262 字节
+     content-type=text/html  content-encoding=undefined
+     content-length=262  accept-ranges=undefined
+     前 32 字节：3c21444f43545950452048544d4c205055424c494320222d2f2f494554462f2f
+     可打印：<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">..<html>..<hea
+  [Range 0-8191] HTTP 412  收到 262 字节
+     content-type=text/html  content-encoding=undefined
+     前 32 字节：3c21444f43545950452048544d4c205055424c494320222d2f2f494554462f2f
+  [Accept-Encoding: identity] HTTP 412  收到 262 字节
+     content-type=text/html  content-encoding=undefined
+     前 32 字节：3c21444f43545950452048544d4c205055424c494320222d2f2f494554462f2f
+
+=== 克卜勒-孙燕姿.flac (fid=16c271ce1ece483a9c1fb2f132d8e346) ===
+  直链：https://dl-guest-sz-u.drive.quark.cn/UK4YVr5y/181705124/65cca971f0447e51cfd9476bafed240e3537ee35/65cca9710ada4…
+  [完整下载] HTTP 412  收到 262 字节
+     content-type=text/html  content-encoding=undefined
+     content-length=262  accept-ranges=undefined
+     前 32 字节：3c21444f43545950452048544d4c205055424c494320222d2f2f494554462f2f
+     可打印：<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">..<html>..<hea
+  [Range 0-8191] HTTP 412  收到 262 字节
+     content-type=text/html  content-encoding=undefined
+     前 32 字节：3c21444f43545950452048544d4c205055424c494320222d2f2f494554462f2f
+  [Accept-Encoding: identity] HTTP 412  收到 262 字节
+     content-type=text/html  content-encoding=undefined
+     前 32 字节：3c21444f43545950452048544d4c205055424c494320222d2f2f494554462f2f
+
+=== 孙燕姿-克卜勒.wav (fid=36c857f72c084294805e768bd20ffe78) ===
+  直链：https://dl-guest-zb-u.drive.quark.cn/ZF0IagYi/101/0d7dce18f1e24e429b19fd3503066b7a65f5c00a/65f5c00a0ee84773a34…
+  [完整下载] HTTP 412  收到 262 字节
+     content-type=text/html  content-encoding=undefined
+     content-length=262  accept-ranges=undefined
+     前 32 字节：3c21444f43545950452048544d4c205055424c494320222d2f2f494554462f2f
+     可打印：<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">..<html>..<hea
+  [Range 0-8191] HTTP 412  收到 262 字节
+     content-type=text/html  content-encoding=undefined
+     前 32 字节：3c21444f43545950452048544d4c205055424c494320222d2f2f494554462f2f
+  [Accept-Encoding: identity] HTTP 412  收到 262 字节
+     content-type=text/html  content-encoding=undefined
+     前 32 字节：3c21444f43545950452048544d4c205055424c494320222d2f2f494554462f2f
+
+=== 孙燕姿-克卜勒.mp3 (fid=3e3ee2c711a64f23a2b605cfd5e48808) ===
+  直链：https://dl-guest-zb-u.drive.quark.cn/Pj7m3z3y/597888553/65f5bc843283d4855ca245cca62be880188ecdda/65f5bc84c7be0…
+  [完整下载] HTTP 412  收到 262 字节
+     content-type=text/html  content-encoding=undefined
+     content-length=262  accept-ranges=undefined
+     前 32 字节：3c21444f43545950452048544d4c205055424c494320222d2f2f494554462f2f
+     可打印：<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">..<html>..<hea
+  [Range 0-8191] HTTP 412  收到 262 字节
+     content-type=text/html  content-encoding=undefined
+     前 32 字节：3c21444f43545950452048544d4c205055424c494320222d2f2f494554462f2f
+  [Accept-Encoding: identity] HTTP 412  收到 262 字节
+     content-type=text/html  content-encoding=undefined
+     前 32 字节：3c21444f43545950452048544d4c205055424c494320222d2f2f494554462f2f
