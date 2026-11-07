@@ -126,7 +126,7 @@ fun PlaylistListScreen(
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 24.dp)
+                contentPadding = PaddingValues(bottom = LocalScreenBottomPad.current + 24.dp)
             ) {
                 // 头部：跟着一起滑走，滑走了顶栏顶上「我的歌单」
                 item(key = "header") {

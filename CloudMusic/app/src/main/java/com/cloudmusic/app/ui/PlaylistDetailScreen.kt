@@ -131,7 +131,7 @@ fun PlaylistDetailScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(bottom = 24.dp)
+            contentPadding = PaddingValues(bottom = LocalScreenBottomPad.current + 24.dp)
         ) {
             // 歌单头：跟着一块儿往上滑，滑走了顶栏顶上歌单名
             item(key = "header") {

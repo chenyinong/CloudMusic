@@ -11,12 +11,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.activity.compose.BackHandler
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -24,6 +26,15 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cloudmusic.app.data.ProviderKind
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.haze
+
+/**
+ * 列表页底部要预留的滚动余量（迷你条 + 页签栏的高度）。
+ *
+ * 曲库/搜索导入/歌单这些列表页是全高渲染的 —— 内容能滚到迷你条后面，
+ * 毛玻璃才有东西可糊；滚动到底不被条挡住由各列表拿这个值做 contentPadding。
+ * 手势条 inset 由内容区统一避让，这里不含它。
+ */
+val LocalScreenBottomPad = staticCompositionLocalOf { 0.dp }
 
 @Composable
 fun CloudMusicRoot(vm: AppViewModel) {
@@ -110,21 +121,24 @@ fun CloudMusicRoot(vm: AppViewModel) {
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-    // 底部条是浮在内容上面的，所以内容区要留出它的高度 ——
-    // 这样每个页面都不用自己操心留白，滚动到底时最后一项正好压在条子上沿。
-    // 还要加上系统手势条那块 inset（页签栏自己避开了它）。
+    // 底部条浮在内容上面。列表页（曲库/搜索导入/歌单）现在全高渲染、
+    // 自己用 LocalScreenBottomPad 留滚动余量 —— 内容能滚到迷你条后面，
+    // 毛玻璃才有东西可糊；其余表单页仍由 formPad 统一避让。
+    // 手势条 inset 由内容区避让一次，列表页的 contentPadding 不重复算。
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val bottomPad = when {
+    val scrollPad = when {
         fullScreen -> 0.dp
-        conn.currentTrack != null -> 126.dp + navBottom
-        else -> 58.dp + navBottom
+        conn.currentTrack != null -> 126.dp
+        else -> 58.dp
     }
+    val formPad = scrollPad + navBottom
     Box(
         Modifier
             .fillMaxSize()
-            .padding(bottom = bottomPad)
+            .padding(bottom = if (fullScreen) 0.dp else navBottom)
             .haze(hazeState)
     ) {
+        CompositionLocalProvider(LocalScreenBottomPad provides scrollPad) {
     when (vm.screen) {
         Screen.LOGIN -> if (vm.loginTarget == ProviderKind.ONEDRIVE) {
             OneDriveLoginScreen(
@@ -202,14 +216,16 @@ fun CloudMusicRoot(vm: AppViewModel) {
             }
         )
 
-        // 导入歌单：只拉清单存进「我的歌单」，一个字节的音频都不下
-        Screen.PLAYLIST_IMPORT -> PlaylistImportScreen(
-            onBack = { vm.screen = Screen.LIBRARY },
-            onOpenPlaylist = { key ->
-                vm.playlistKey = key
-                vm.screen = Screen.PLAYLIST_DETAIL
-            }
-        )
+        // 导入歌单：预览页底部有操作按钮，走统一避让（不参与滚到条后面）
+        Screen.PLAYLIST_IMPORT -> Box(Modifier.padding(bottom = formPad)) {
+            PlaylistImportScreen(
+                onBack = { vm.screen = Screen.LIBRARY },
+                onOpenPlaylist = { key ->
+                    vm.playlistKey = key
+                    vm.screen = Screen.PLAYLIST_DETAIL
+                }
+            )
+        }
 
         // 我的歌单：网易云那种列表，点进去才是歌单详情
         Screen.PLAYLIST_LIST -> PlaylistListScreen(
@@ -240,23 +256,30 @@ fun CloudMusicRoot(vm: AppViewModel) {
                             }
                         )
 
-                    Screen.SETTINGS -> SettingsScreen(vm = vm, onBack = { vm.screen = Screen.LIBRARY })
+                    Screen.SETTINGS -> Box(Modifier.padding(bottom = formPad)) {
+                        SettingsScreen(vm = vm, onBack = { vm.screen = Screen.LIBRARY })
+                    }
 
         // 登录夸克网盘（下载链路的中转站）
-        Screen.QUARK_LOGIN -> QuarkLoginScreen(
-            onBack = { vm.screen = Screen.SETTINGS },
-            onLoggedIn = { cookie, _ ->
-                vm.saveQuarkCookie(cookie)
-                vm.screen = Screen.QUARK_DIAG
-            }
-        )
+        Screen.QUARK_LOGIN -> Box(Modifier.padding(bottom = formPad)) {
+            QuarkLoginScreen(
+                onBack = { vm.screen = Screen.SETTINGS },
+                onLoggedIn = { cookie, _ ->
+                    vm.saveQuarkCookie(cookie)
+                    vm.screen = Screen.QUARK_DIAG
+                }
+            )
+        }
 
         // 诊断台：一次性定性「登录态签出来的直链能不能下」
-        Screen.QUARK_DIAG -> QuarkDiagScreen(
-            loggedIn = vm.quarkLoggedIn,
-            onBack = { vm.screen = Screen.SETTINGS },
-            onOpenLogin = { vm.screen = Screen.QUARK_LOGIN }
-        )
+        Screen.QUARK_DIAG -> Box(Modifier.padding(bottom = formPad)) {
+            QuarkDiagScreen(
+                loggedIn = vm.quarkLoggedIn,
+                onBack = { vm.screen = Screen.SETTINGS },
+                onOpenLogin = { vm.screen = Screen.QUARK_LOGIN }
+            )
+        }
+        }
     }
     }
 
@@ -282,7 +305,8 @@ fun CloudMusicRoot(vm: AppViewModel) {
                 }
                 BottomTabBar(
                     current = tabOf(vm.screen),
-                    onSelect = { vm.screen = it }
+                    onSelect = { vm.screen = it },
+                    hazeState = hazeState
                 )
             }
         }

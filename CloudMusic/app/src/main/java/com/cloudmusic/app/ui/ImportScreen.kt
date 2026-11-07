@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -103,7 +104,10 @@ fun ImportScreen(
         //
         // 所以整页做成一个大 LazyColumn：表单当第一个 item，结果接着往下排。
         // （不能用 Column + verticalScroll 包 LazyColumn，那样列表拿不到高度约束。）
-        LazyColumn(Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = LocalScreenBottomPad.current)
+        ) {
             // 搜索框吸顶：结果往下滚的时候还能随时改词重搜，不用滑回顶部
             stickyHeader(key = "search") {
                 Column(

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LibraryMusic
@@ -42,7 +43,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -51,9 +54,36 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.HazeTint
 import dev.chrisbanes.haze.hazeChild
-import dev.chrisbanes.haze.materials.HazeMaterials
 import kotlinx.coroutines.delay
+
+/**
+ * mini 条和 TAB 栏共用的毛玻璃参数：清透白玻璃（深色模式换深玻璃）。
+ * HazeMaterials.thin 是 Android 12 材质风格，自带深色 tint + 噪点，
+ * 在浅色页上发灰发脏，所以手动调；两份样式必须一致，不然两条玻璃会一大一小两种白。
+ */
+@Composable
+private fun frostedGlassStyle(): HazeStyle {
+    return if (isSystemInDarkTheme()) {
+        HazeStyle(
+            backgroundColor = Color(0xFF121418),
+            tints = listOf(HazeTint(Color(0xFF1C2026).copy(alpha = 0.38f))),
+            blurRadius = 22.dp,
+            noiseFactor = 0f,
+            fallbackTint = HazeTint(Color(0xFF1C2026).copy(alpha = 0.85f)),
+        )
+    } else {
+        HazeStyle(
+            backgroundColor = Color.White,
+            tints = listOf(HazeTint(Color.White.copy(alpha = 0.32f))),
+            blurRadius = 22.dp,
+            noiseFactor = 0f,
+            fallbackTint = HazeTint(Color.White.copy(alpha = 0.8f)),
+        )
+    }
+}
 
 /**
  * 底部「正在播放」悬浮条 —— 网易云那个样式。
@@ -119,12 +149,13 @@ fun MiniPlayerBar(
         }
     }
 
-    // 磨砂玻璃：背后内容实时模糊（haze，API 31+ 完整效果；低版本退化成半透明），
-    // 内侧 1dp 高光描边出玻璃边。深浅模式 HazeMaterials 按背景色自动配。
+    // 磨砂玻璃：背后内容实时模糊（haze，API 31+ 完整效果；低版本退化成半透明）
     val isDark = isSystemInDarkTheme()
-    val glassStroke = if (isDark) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.6f)
+    val glassStyle = frostedGlassStyle()
+    // 浮岛形态：四角都圆，左右和底部留边距，盖在内容上面像一块悬浮的玻璃卡片；
+    // 背后仍是 haze 毛玻璃实时模糊。
+    val barShape = RoundedCornerShape(18.dp)
     Surface(
-        // 浮岛：左右和底部留边距，四角都圆，盖在内容上面像一块悬浮的玻璃卡片
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp)
@@ -133,102 +164,114 @@ fun MiniPlayerBar(
                 if (hazeState != null) {
                     Modifier.hazeChild(
                         state = hazeState,
-                        shape = RoundedCornerShape(18.dp),
-                        style = HazeMaterials.thin(
-                            containerColor = MaterialTheme.colorScheme.background
-                        ),
+                        shape = barShape,
+                        style = glassStyle,
                     )
                 } else {
                     Modifier
                 }
-            )
-            .border(1.dp, glassStroke, RoundedCornerShape(18.dp)),
+            ),
         color = Color.Transparent,
-        // 色调叠加会发绿，这里只留投影
         tonalElevation = 0.dp,
-        shadowElevation = 12.dp,
-        shape = RoundedCornerShape(18.dp),
+        shadowElevation = 0.dp,
+        shape = barShape,
     ) {
-        Column {
+        Box {
+            // 玻璃高光：顶部略亮往下渐隐，白玻璃的厚度感
             Box(
                 Modifier
-                    .fillMaxWidth()
-                    .height(2.dp)
-                    .background(Color.White.copy(alpha = if (isDark) 0.10f else 0.30f))
-            ) {
+                    .matchParentSize()
+                    .background(
+                        Brush.verticalGradient(
+                            if (isDark) listOf(Color.White.copy(alpha = 0.05f), Color.Transparent)
+                            else listOf(Color.White.copy(alpha = 0.35f), Color.White.copy(alpha = 0.04f))
+                        )
+                    )
+            )
+            Column {
                 Box(
                     Modifier
-                        .fillMaxWidth(progress)
-                        .fillMaxHeight()
-                        .background(MaterialTheme.colorScheme.primary)
-                )
-            }
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = 12.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                GradientCover(
-                    seed = player.currentTrack?.album?.takeIf { it.isNotBlank() } ?: title,
-                    size = 42.dp,
-                    corner = 21.dp,
-                    // 封面也能点 —— 跟歌名区域一样进歌词页
-                    modifier = Modifier
-                        .rotate(angle)
-                        .clickable(onClick = onOpenPlayer)
-                )
-                Spacer(Modifier.width(10.dp))
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .clickable(onClick = onOpenPlayer)
+                        .fillMaxWidth()
+                        .height(2.dp)
+                        .background(Color.White.copy(alpha = if (isDark) 0.10f else 0.30f))
                 ) {
-                    Text(
-                        title.ifBlank { "未知歌曲" },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Text(
-                        artist.ifBlank { "未知歌手" },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    Box(
+                        Modifier
+                            .fillMaxWidth(progress)
+                            .fillMaxHeight()
+                            .background(MaterialTheme.colorScheme.primary)
                     )
                 }
-                MiniIconButton(
-                    icon = Icons.Filled.SkipPrevious,
-                    description = "上一首",
-                    enabled = canSwitch,
-                    onClick = {
-                        if (casting != null) dlna.previousCast() else player.previous()
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(54.dp)
+                        .padding(start = 14.dp, end = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    GradientCover(
+                        seed = player.currentTrack?.album?.takeIf { it.isNotBlank() } ?: title,
+                        size = 40.dp,
+                        corner = 20.dp,
+                        // 封面也能点 —— 跟歌名区域一样进歌词页
+                        modifier = Modifier
+                            .rotate(angle)
+                            .clickable(onClick = onOpenPlayer)
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        // 参考图是「歌名 - 歌手」单行粗体
+                        if (artist.isBlank()) title.ifBlank { "未知歌曲" }
+                        else "${title.ifBlank { "未知歌曲" }} - $artist",
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable(onClick = onOpenPlayer),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    // 播放/暂停：白底圆形按钮（参考图样式）
+                    Box(
+                        Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(if (isDark) Color.White.copy(alpha = 0.12f) else Color.White)
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                                CircleShape
+                            )
+                            .clickable {
+                                if (casting != null) dlna.toggleCast() else player.toggle()
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                            contentDescription = if (playing) "暂停" else "播放",
+                            tint = if (isDark) Color.White else Color(0xFF1B1B1B),
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
-                )
-                MiniIconButton(
-                    icon = if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    description = if (playing) "暂停" else "播放",
-                    tint = MaterialTheme.colorScheme.primary,
-                    onClick = {
-                        if (casting != null) dlna.toggleCast() else player.toggle()
-                    }
-                )
-                MiniIconButton(
-                    icon = Icons.Filled.SkipNext,
-                    description = "下一首",
-                    enabled = canSwitch,
-                    onClick = {
-                        if (casting != null) dlna.nextCast() else player.next()
-                    }
-                )
-                MiniIconButton(
-                    icon = Icons.Filled.QueueMusic,
-                    description = "播放列表",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    onClick = onOpenQueue
-                )
+                    Spacer(Modifier.width(4.dp))
+                    MiniIconButton(
+                        icon = Icons.Filled.SkipNext,
+                        description = "下一首",
+                        enabled = canSwitch,
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        onClick = {
+                            if (casting != null) dlna.nextCast() else player.next()
+                        }
+                    )
+                    MiniIconButton(
+                        icon = Icons.Filled.QueueMusic,
+                        description = "播放列表",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        onClick = onOpenQueue
+                    )
+                }
             }
         }
     }
@@ -287,31 +330,64 @@ fun tabOf(screen: Screen): Screen = when (screen) {
  * 网易云那个样子：纯图标 + 小字，选中的那个染成主题色。
  * 没做成 Material3 的 NavigationBar —— 那个默认 80dp 高，
  * 加上上面的迷你播放器就把屏幕占掉太多。
+ *
+ * 和 mini 条共用同一套毛玻璃：同样的四角圆角浮岛、同样的模糊和 tint、
+ * 无投影无描边，两条玻璃看起来是一组。
  */
 @Composable
 fun BottomTabBar(
     current: Screen,
     onSelect: (Screen) -> Unit,
     modifier: Modifier = Modifier,
+    /** 毛玻璃模糊源（和 mini 条同一个 HazeState）。null 时退化为普通底色。 */
+    hazeState: HazeState? = null,
 ) {
+    val isDark = isSystemInDarkTheme()
+    val barShape = RoundedCornerShape(18.dp)
     Surface(
-        modifier = modifier.fillMaxWidth(),
-        // 和列表页用同一个底色；tonalElevation 必须为 0 ——
-        // M3 的 Surface 会把主题色按高度叠上去，一叠就发绿，跟页面不搭
-        color = MaterialTheme.colorScheme.background,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp)
+            .padding(bottom = 8.dp)
+            .then(
+                if (hazeState != null) {
+                    Modifier.hazeChild(
+                        state = hazeState,
+                        shape = barShape,
+                        style = frostedGlassStyle(),
+                    )
+                } else {
+                    Modifier
+                }
+            ),
+        color = if (hazeState != null) Color.Transparent else MaterialTheme.colorScheme.background,
         tonalElevation = 0.dp,
-        shadowElevation = 6.dp,
+        shadowElevation = 0.dp,
+        shape = barShape,
     ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                // 先把系统手势条那块 inset 撑出来，再定内容高度 ——
-                // 不然图标就压在导航条上（顺序反了的话 inset 会被 height 吃掉）
-                .windowInsetsPadding(WindowInsets.navigationBars)
-                .height(54.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Box {
+            if (hazeState != null) {
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .background(
+                            Brush.verticalGradient(
+                                if (isDark) listOf(Color.White.copy(alpha = 0.05f), Color.Transparent)
+                                else listOf(Color.White.copy(alpha = 0.35f), Color.White.copy(alpha = 0.04f))
+                            )
+                        )
+                )
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    // 先把系统手势条那块 inset 撑出来，再定内容高度 ——
+                    // 不然图标就压在导航条上（顺序反了的话 inset 会被 height 吃掉）
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .height(54.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
             BOTTOM_TABS.forEach { tab ->
                 val selected = current == tab.screen
                 val tint = if (selected) MaterialTheme.colorScheme.primary
@@ -341,6 +417,7 @@ fun BottomTabBar(
                         color = tint
                     )
                 }
+            }
             }
         }
     }
