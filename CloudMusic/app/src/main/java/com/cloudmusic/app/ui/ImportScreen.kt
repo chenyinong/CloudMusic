@@ -173,12 +173,14 @@ fun ImportScreen(
                                 Text(
                                     p.shortLabel,
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = if (selected) MaterialTheme.colorScheme.primary
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                    // 和曲库页筛选胶囊一致：选中实底黑 + 白字
+                                    color = if (selected) MaterialTheme.colorScheme.onPrimary
                                     else MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
+                                        .clip(RoundedCornerShape(9.dp))
                                         .background(
-                                            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                            if (selected) MaterialTheme.colorScheme.primary
                                             else MaterialTheme.colorScheme.surfaceVariant
                                         )
                                         .clickable { vm.setProvider(p) }
@@ -269,13 +271,15 @@ fun ImportScreen(
                             Text(
                                 "${f.label} ${vm.countOf(f)}",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = if (selected) MaterialTheme.colorScheme.primary
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                // 和「导入到」胶囊、曲库页筛选胶囊一致：选中实底黑 + 白字
+                                color = if (selected) MaterialTheme.colorScheme.onPrimary
                                 else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(RoundedCornerShape(9.dp))
                                     .background(
-                                        if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                        if (selected) MaterialTheme.colorScheme.primary
                                         else MaterialTheme.colorScheme.surfaceVariant
                                     )
                                     .clickable { vm.sourceFilter = f }
