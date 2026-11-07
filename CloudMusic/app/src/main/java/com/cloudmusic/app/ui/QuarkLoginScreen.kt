@@ -130,6 +130,9 @@ fun QuarkLoginScreen(
                             "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                     CookieManager.getInstance().setAcceptCookie(true)
                     CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                    // 进登录页先把夸克域的旧登录态清掉，免得还挂着上一个账号
+                    // （退出登录只清了 App 存的 cookie，WebView 全局 cookie 没动）。
+                    clearQuarkWebViewCookies()
                     webViewClient = object : WebViewClient() {
                         // 兜底：万一又被导到「下载 App」推广页，切回网页版
                         var retry = 0
@@ -241,4 +244,33 @@ private fun harvestCookies(cm: CookieManager): String {
         }
     }
     return merged.entries.joinToString("; ") { "${it.key}=${it.value}" }
+}
+
+/**
+ * 清掉夸克相关域的旧登录态。
+ *
+ * `clearQuark()` 只清了 App 自己存的 `SharedPreferences` cookie，
+ * 但 WebView 的全局 cookie（[CookieManager]）没动 —— 退出登录再进登录页
+ * 时，网页还认得老账号，用户就没法换号了。
+ * 这里把夸克几个域的 cookie 逐个置过期清掉。
+ */
+private fun clearQuarkWebViewCookies() {
+    val cm = CookieManager.getInstance()
+    val domains = arrayOf(
+        "https://pan.quark.cn/",
+        "https://quark.cn/",
+        "https://h5.sm.cn/",
+        "https://drive.quark.cn/",
+        "https://drive-pc.quark.cn/"
+    )
+    for (u in domains) {
+        val raw = kotlin.runCatching { cm.getCookie(u) }.getOrNull() ?: continue
+        for (part in raw.split(';')) {
+            val name = part.trim().substringBefore('=').trim()
+            if (name.isNotBlank()) {
+                cm.setCookie(u, "$name=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/")
+            }
+        }
+    }
+    cm.flush()
 }

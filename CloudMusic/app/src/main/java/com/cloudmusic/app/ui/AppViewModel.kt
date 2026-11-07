@@ -201,26 +201,41 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------------- 夸克网盘（下载链路的中转站） ----------------
 
-    /** 夸克是否已登录 */
-    val quarkLoggedIn: Boolean get() = prefs.quarkLoggedIn
+    /**
+     * 夸克是否已登录。
+     *
+     * 用可观察的 State 而不是普通 `get()` —— 否则点「退出登录」后
+     * `clearQuark()` 确实清了 SharedPreferences，但界面不重组，
+     * 看着就像「没生效」。重进设置页才刷新。
+     */
+    var quarkLoggedIn by mutableStateOf(prefs.quarkLoggedIn)
+        private set
 
     /** 夸克登录态是不是该换了（cookie 一般一个多月就失效） */
     val quarkCookieStale: Boolean get() = prefs.quarkCookieStale
 
-    val quarkAccount: String get() = prefs.quarkAccount
+    var quarkAccount by mutableStateOf(prefs.quarkAccount)
+        private set
 
     /** 保存夸克登录态。cookie 来自 WebView 抓取。 */
     fun saveQuarkCookie(cookie: String) {
         prefs.saveQuark(cookie, "")
+        quarkLoggedIn = prefs.quarkLoggedIn
+        quarkAccount = prefs.quarkAccount
         viewModelScope.launch {
             // 顺便把账号昵称拉回来，界面上好看点
             val name = appRef.quarkClient.accountName()
-            if (name.isNotBlank()) prefs.quarkAccount = name
+            if (name.isNotBlank()) {
+                prefs.quarkAccount = name
+                quarkAccount = name
+            }
         }
     }
 
     fun clearQuark() {
         prefs.clearQuark()
+        quarkLoggedIn = false
+        quarkAccount = ""
     }
 
     fun changeOneDriveScopeMode(mode: String) {
