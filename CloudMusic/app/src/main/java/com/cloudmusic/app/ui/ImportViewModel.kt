@@ -20,8 +20,10 @@ import com.cloudmusic.app.data.ProviderKind
 import com.cloudmusic.app.data.Track
 import com.cloudmusic.app.data.UploadResult
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
 import org.json.JSONObject
 import java.io.File
 
@@ -62,6 +64,18 @@ private data class ImportedRecord(
     val dir: String,
     /** 文件大小（字节） */
     val size: Long,
+)
+
+/**
+ * 一首下好了、正等着传进网盘的歌。
+ *
+ * 导入拆成两段就是这个队列的用处 ——
+ * 下载完就放手，别占着位置干等上传。
+ */
+private class PendingUpload(
+    val hit: MusicHit,
+    val dl: com.cloudmusic.app.data.DownloadResult.Ok,
+    val kind: ProviderKind,
 )
 
 /**
@@ -108,6 +122,33 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
     /** 已经导进网盘的记录（搜索结果 id → 网盘里的位置）。 */
     private val imported = mutableMapOf<String, ImportedRecord>()
 
+    /**
+     * 下好了、排队等着上传的歌。
+     *
+     * 导入拆成「下载」和「上传」两段，中间用这个队列接一下 ——
+     * 第一首下完就立刻开始上传，第二首同时在下第三首在等。
+     * 串着做的话，一首歌的时间是「下载 + 上传」，其中网盘那头的固定开销
+     * （OneDrive 每个上传请求都要等服务端处理，实测 13 秒上下）
+     * 是白等 —— 几首一起导，这些等待就能重叠起来。
+     */
+    private val uploadQueue = Channel<PendingUpload>(Channel.UNLIMITED)
+
+    /**
+     * 同时最多几首在下载。
+     *
+     * 不能无限并发：夸克 CDN 和 OneDrive 都会限流。
+     * 3 是个实测比较稳的值（手机一次下 3 首，速率不掉）。
+     */
+    private val downloadSlots = Semaphore(3)
+
+    /**
+     * 同时最多几首在上传。
+     *
+     * 上传 worker 的数量就是并发度。OneDrive 每个请求都要等服务端处理，
+     * 并发 2 个能把这段等待摊开，再多容易被微软限流（429）。
+     */
+    private val uploadWorkers = 2
+
     /** 正在删除的条目，避免用户连点。 */
     var deletingIds by mutableStateOf(setOf<String>())
         private set
@@ -127,6 +168,16 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
     init {
         // 重启后把「已导入」恢复出来，用户点那条就是直接播放
         reloadImported()
+
+        // 上传 worker：常驻，从队列里取歌往网盘传。
+        // 固定几个是因为每个上传请求都得等服务端处理，并发才吃得下这份等待。
+        repeat(uploadWorkers) {
+            viewModelScope.launch {
+                for (p in uploadQueue) {
+                    uploadOne(p)
+                }
+            }
+        }
     }
 
     /**
@@ -255,6 +306,11 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * 导入一首歌 —— 只负责「下载」这一段。
+     *
+     * 下好之后交给上传队列，不再占着下载的位置干等网盘。
+     */
     fun import(hit: MusicHit) {
         val kind = ProviderKind.of(providerId)
         val provider = providerOf(kind)
@@ -265,101 +321,160 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         val cur = states[hit.id]
         if (cur != null && cur.phase.isNotBlank() && !cur.done && !cur.failed) return
 
-        setPhase(hit.id, ImportState(phase = "解析直链中"))
+        setPhase(hit.id, ImportState(phase = "排队中"))
         viewModelScope.launch {
-            val tmp = File(
-                appRef.cacheDir,
-                "import_${safeName(hit.id)}.${hit.ext.ifBlank { "mp3" }}"
-            )
-            setPhase(hit.id, ImportState(phase = "下载中"))
-            val dl = appRef.musicSearch.download(hit, tmp) { got, total ->
-                // 有总长度就报百分比，没有就报已下多少 MB
-                val phase = if (total > 0) {
-                    "下载中 ${got * 100 / total}%"
-                } else {
-                    "下载中 ${got / 1048576} MB"
-                }
-                setPhase(hit.id, ImportState(phase = phase))
-            }
-            if (dl is DownloadResult.Failed) {
-                tmp.delete()
-                lastTimings = dl.timings
-                setPhase(
-                    hit.id,
-                    ImportState(
-                        phase = "失败",
-                        failed = true,
-                        message = listOfNotNull(dl.message, dl.note.takeIf { it.isNotBlank() })
-                            .joinToString(" · "),
-                        timings = dl.timings
-                    )
+            // 下载许可：同时最多几首在下。抢不到就等着，
+            // 免得一下子开十几个连接把 CDN 和网盘都打挂。
+            downloadSlots.acquire()
+            try {
+                val tmp = File(
+                    appRef.cacheDir,
+                    "import_${safeName(hit.id)}.${hit.ext.ifBlank { "mp3" }}"
                 )
-                return@launch
-            }
-            if (dl is DownloadResult.Partial) {
-                tmp.delete()
-                lastTimings = dl.timings
-                setPhase(
-                    hit.id,
-                    ImportState(
-                        phase = "下不到完整版",
-                        failed = true,
-                        message = listOfNotNull(
-                            "公开渠道只能拿到 ${dl.gotSec} 秒试听（完整 ${dl.wantSec} 秒）",
-                            dl.note.takeIf { it.isNotBlank() },
-                        ).joinToString(" · "),
-                        timings = dl.timings
-                    )
-                )
-                return@launch
-            }
-            val ok = dl as DownloadResult.Ok
-            // 文件名要用**下载完才知道**的真实扩展名 —— 夸克那边给的是 FLAC / WAV，
-            // 存成 .mp3 播放器按扩展名解析会失败
-            val fileName = buildFileName(hit, ok.ext)
-            setPhase(hit.id, ImportState(phase = "上传中"))
-            val tUpload = System.nanoTime()
-            val up = provider.upload(ok.file, dir, fileName) { sent, total ->
-                val phase = if (total > 0) {
-                    "上传中 ${sent * 100 / total}%"
-                } else {
-                    "上传中 ${sent / 1048576} MB"
+                setPhase(hit.id, ImportState(phase = "下载中"))
+                val dl = appRef.musicSearch.download(hit, tmp) { got, total ->
+                    // 有总长度就报百分比，没有就报已下多少 MB
+                    val phase = if (total > 0) {
+                        "下载中 ${got * 100 / total}%"
+                    } else {
+                        "下载中 ${got / 1048576} MB"
+                    }
+                    setPhase(hit.id, ImportState(phase = phase))
                 }
-                setPhase(hit.id, ImportState(phase = phase))
+                if (dl is DownloadResult.Failed) {
+                    tmp.delete()
+                    lastTimings = dl.timings
+                    setPhase(
+                        hit.id,
+                        ImportState(
+                            phase = "失败",
+                            failed = true,
+                            message = listOfNotNull(dl.message, dl.note.takeIf { it.isNotBlank() })
+                                .joinToString(" · "),
+                            timings = dl.timings
+                        )
+                    )
+                    return@launch
+                }
+                if (dl is DownloadResult.Partial) {
+                    tmp.delete()
+                    lastTimings = dl.timings
+                    setPhase(
+                        hit.id,
+                        ImportState(
+                            phase = "下不到完整版",
+                            failed = true,
+                            message = listOfNotNull(
+                                "公开渠道只能拿到 ${dl.gotSec} 秒试听（完整 ${dl.wantSec} 秒）",
+                                dl.note.takeIf { it.isNotBlank() },
+                            ).joinToString(" · "),
+                            timings = dl.timings
+                        )
+                    )
+                    return@launch
+                }
+                val ok = dl as DownloadResult.Ok
+                // 交给上传队列。这一步一放行，下一首就能接着下。
+                uploadQueue.send(PendingUpload(hit, ok, kind))
+            } finally {
+                downloadSlots.release()
             }
-            val uploadMs = (System.nanoTime() - tUpload) / 1_000_000
+        }
+    }
+
+    /**
+     * 上传阶段：把下好的文件传进网盘，然后记账。
+     *
+     * 由上传 worker 调用，一首一首来。
+     */
+    private suspend fun uploadOne(p: PendingUpload) {
+        val hit = p.hit
+        val ok = p.dl
+        val provider = providerOf(p.kind)
+        if (provider == null) {
             ok.file.delete()
-            val timings = (ok.timings ?: ImportTimings()).copy(uploadMs = uploadMs)
-            lastTimings = timings
-            Log.i(TAG, "《${hit.title}》导入完成 $timings")
-            if (up is UploadResult.Failed) {
-                setPhase(
-                    hit.id,
-                    ImportState(phase = "上传失败", failed = true, message = up.message, timings = timings)
-                )
-                return@launch
-            }
-            val entryId = (up as UploadResult.Ok).entryId
-            val track = trackOf(provider, kind, entryId, fileName, ok.bytes)
-            // 记下来：以后点这条直接播放，不用再下一遍
-            // 先把记录跟本地同步一次，免得把别处删掉的条目又写回去
-            reloadImported()
-            rememberImported(hit.id, kind, entryId, fileName, ok.bytes)
             setPhase(
                 hit.id,
                 ImportState(
-                    phase = "已导入",
-                    done = true,
-                    message = "已存到 ${kind.shortLabel}",
-                    track = track,
-                    timings = timings
+                    phase = "失败",
+                    failed = true,
+                    message = "${p.kind.shortLabel} 还没连上，先去设置里连网盘"
                 )
             )
-            // 顺手写进曲库索引，不等整盘扫描就能在「我的」里看到
-            track?.let { appRef.repository.upsertTrack(it) }
-            importedCount++
+            return
         }
+        // 文件名要用**下载完才知道**的真实扩展名 —— 夸克那边给的是 FLAC / WAV，
+        // 存成 .mp3 播放器按扩展名解析会失败
+        val fileName = buildFileName(hit, ok.ext)
+        setPhase(hit.id, ImportState(phase = "上传中"))
+        val tUpload = System.nanoTime()
+        val up = provider.upload(ok.file, dir, fileName) { sent, total ->
+            val phase = if (total > 0) {
+                "上传中 ${sent * 100 / total}%"
+            } else {
+                "上传中 ${sent / 1048576} MB"
+            }
+            setPhase(hit.id, ImportState(phase = phase))
+        }
+        val uploadMs = (System.nanoTime() - tUpload) / 1_000_000
+        ok.file.delete()
+        val timings = ok.timings.copy(uploadMs = uploadMs)
+        lastTimings = timings
+        Log.i(TAG, "《${hit.title}》导入完成 $timings")
+        if (up is UploadResult.Failed) {
+            setPhase(
+                hit.id,
+                ImportState(phase = "上传失败", failed = true, message = up.message, timings = timings)
+            )
+            return
+        }
+        val entryId = (up as UploadResult.Ok).entryId
+        val track = trackOf(provider, p.kind, entryId, fileName, ok.bytes)
+        // 记下来：以后点这条直接播放，不用再下一遍
+        // 先把记录跟本地同步一次，免得把别处删掉的条目又写回去
+        reloadImported()
+        rememberImported(hit.id, p.kind, entryId, fileName, ok.bytes)
+        setPhase(
+            hit.id,
+            ImportState(
+                phase = "已导入",
+                done = true,
+                message = "已存到 ${p.kind.shortLabel}",
+                track = track,
+                timings = timings
+            )
+        )
+        // 顺手写进曲库索引，不等整盘扫描就能在「我的」里看到
+        track?.let { appRef.repository.upsertTrack(it) }
+        importedCount++
     }
+
+    /**
+     * 批量导入：把这一批歌一股脑丢进流水线。
+     *
+     * 一首一首导，网盘那头的固定等待要付 N 遍（实测 OneDrive 每个上传请求
+     * 都要等服务端处理，13 秒上下，跟文件大小无关）；
+     * 一起导，这些等待就重叠起来了，只付一遍。
+     */
+    fun importAll(list: List<MusicHit>) {
+        val todo = list.filter { hit ->
+            val st = states[hit.id]
+            st == null || (!st.done && !st.failed)
+        }
+        if (todo.isEmpty()) {
+            message = "这些都已经导过了"
+            return
+        }
+        message = "已排进队列：${todo.size} 首"
+        todo.forEach { import(it) }
+    }
+
+    /** 这一批里还有多少首没导完（按钮上的数字）。 */
+    fun pendingOf(list: List<MusicHit>): Int =
+        list.count { hit ->
+            val st = states[hit.id]
+            st == null || (!st.done && !st.failed)
+        }
 
     /**
      * 点一条「已导入」的记录 → 直接播放它。

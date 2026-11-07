@@ -284,6 +284,41 @@ fun ImportScreen(
                 }
             }
 
+            // 批量导入。
+            //
+            // 网盘那头有一段「等服务端处理」的固定等待（OneDrive 实测 13 秒上下，
+            // 跟文件大小无关）。一首一首导，这段等待要付 N 遍；
+            // 一起导，等待重叠起来，整批就快得多。
+            if (vm.hits.isNotEmpty()) {
+                item(key = "batch") {
+                    val pending = vm.pendingOf(visible)
+                    val running = vm.states.count {
+                        it.value.phase.isNotBlank() && !it.value.done && !it.value.failed
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        SmallPill(
+                            if (pending > 0) "并发导入剩下的 $pending 首" else "这批都导完了",
+                            MaterialTheme.colorScheme.primary
+                        ) {
+                            vm.importAll(visible)
+                        }
+                        if (running > 0) {
+                            Text(
+                                "进行中 $running 首",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
             // 最近一次导入的各阶段耗时 —— 用来判断「慢」到底慢在哪一段
             vm.lastTimings?.let { t ->
                 item(key = "timings") {

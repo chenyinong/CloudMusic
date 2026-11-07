@@ -105,25 +105,41 @@ class OneDriveUploader(
         val body = com.cloudmusic.app.data.progressRequestBody(
             file, "application/octet-stream", onProgress
         )
-        val request = Request.Builder()
-            .url(contentUrl(folderId, fileName))
-            .put(body)
-            .header("Authorization", "Bearer $token")
-            .build()
-        return try {
-            http.newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) {
-                    UploadResult.Failed(explain(resp.code, resp.body?.string().orEmpty()))
+        // 并发导入之后，微软限流（429）就常见了 —— 值得退避再试。
+        repeat(3) { attempt ->
+            val request = Request.Builder()
+                .url(contentUrl(folderId, fileName))
+                .put(body)
+                .header("Authorization", "Bearer $token")
+                .build()
+            try {
+                http.newCall(request).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val id = runCatching {
+                            JSONObject(resp.body?.string().orEmpty()).optString("id")
+                        }.getOrDefault("")
+                        return UploadResult.Ok(id.ifEmpty { fileName })
+                    }
+                    val code = resp.code
+                    // 限流和微软自己抽风都值得再等等
+                    if ((code == 429 || code >= 500) && attempt < 2) {
+                        val wait = 1500L * (attempt + 1)
+                        Log.w(TAG, "OneDrive 上传 HTTP $code，${wait}ms 后重试")
+                        delay(wait)
+                        return@use
+                    }
+                    return UploadResult.Failed(explain(code, resp.body?.string().orEmpty()))
+                }
+            } catch (e: Exception) {
+                if (attempt < 2) {
+                    Log.w(TAG, "OneDrive 上传异常 ${e.javaClass.simpleName}，重试")
+                    delay(1500L * (attempt + 1))
                 } else {
-                    val id = runCatching {
-                        JSONObject(resp.body?.string().orEmpty()).optString("id")
-                    }.getOrDefault("")
-                    UploadResult.Ok(id.ifEmpty { fileName })
+                    return UploadResult.Failed("上传失败：${e.message ?: "网络异常"}")
                 }
             }
-        } catch (e: Exception) {
-            UploadResult.Failed("上传失败：${e.message ?: "网络异常"}")
         }
+        return UploadResult.Failed("上传失败：试了 3 次都没成功，稍后再试试")
     }
 
     // ------------------------------------------------------------ 上传会话
@@ -246,8 +262,9 @@ class OneDriveUploader(
                         "分块上传失败 http=${resp.code} offset=$offset " +
                             "body=${resp.body?.string().orEmpty().take(200)}"
                     )
-                    // 4xx 是请求本身有问题（比如块大小不对），重试没用
-                    if (resp.code in 400..499) return null
+                    // 4xx 是请求本身有问题（比如块大小不对），重试没用。
+                    // 但 429 是限流 —— 等一下再来。
+                    if (resp.code in 400..499 && resp.code != 429) return null
                 }
             } catch (e: Exception) {
                 prefs.logAuth("分块上传异常 offset=$offset ${e.javaClass.simpleName}: ${e.message}")
