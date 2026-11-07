@@ -1,6 +1,7 @@
 package com.cloudmusic.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,12 +13,21 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -39,10 +49,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.cloudmusic.app.BuildConfig
 import com.cloudmusic.app.data.ProviderKind
 import com.cloudmusic.app.data.formatBytes
@@ -69,7 +81,8 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
                     )
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = Color.Transparent
+                    // 用实底：滚动时卡片不会从标题后面透出来
+                    containerColor = MaterialTheme.colorScheme.background
                 ),
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -84,11 +97,11 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // ── 已连接的网盘 ────────────────────────────────
-            SettingsCard {
+            SettingsCard("网盘连接", Icons.Filled.Cloud) {
                 if (vm.connectedProviders.isEmpty()) {
                     Text(
                         "还没有连接任何网盘",
@@ -121,7 +134,7 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
             }
 
             // ── 外观 ───────────────────────────────────────
-            SettingsCard {
+            SettingsCard("外观", Icons.Filled.Palette) {
                 SwitchRow(
                     title = "跟随系统深色模式",
                     subtitle = "开启后随系统切换深色；关闭则固定浅色",
@@ -137,7 +150,7 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
                 } else {
                     ProviderKind.ONEDRIVE
                 }
-                SettingsCard {
+                SettingsCard("添加网盘", Icons.Filled.Add) {
                     ActionRow(
                         text = "添加 ${other.label}",
                         onClick = {
@@ -149,7 +162,7 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
             }
 
             // ── 歌词 ───────────────────────────────────────
-            SettingsCard {
+            SettingsCard("歌词", Icons.Filled.MusicNote) {
                 SwitchRow(
                     title = "在线歌词",
                     subtitle = "开启后按歌名 + 歌手去 QQ 音乐匹配歌词，QQ 没有的再去下歌吧找；" +
@@ -160,9 +173,9 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
             }
 
             // ── 夸克网盘：下载链路的中转站 ────────────────────
-            SettingsCard {
+            SettingsCard("下载中转", Icons.Filled.CloudDownload) {
                 Text(
-                    "夸克网盘（下载中转）",
+                    "夸克网盘",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold
                 )
@@ -221,7 +234,7 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
             }
 
             // ── 维护操作 ─────────────────────────────────────
-            SettingsCard {
+            SettingsCard("维护", Icons.Filled.Settings) {
                 ActionRow("重新扫描音乐库") { vm.rescan() }
                 RowDivider()
                 ActionRow("清理播放缓存") { vm.clearCache() }
@@ -237,9 +250,9 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
             }
 
             // ── 关于 ────────────────────────────────────────
-            SettingsCard {
+            SettingsCard("关于", Icons.Filled.Info) {
                 Text(
-                    "关于",
+                    "云音乐",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold
                 )
@@ -268,17 +281,52 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
     }
 }
 
-/** 分组白卡 */
+/**
+ * 分组 = 卡片外一行小标题（带图标）+ 一张白卡。
+ *
+ * 高级感主要来自这层节奏：标题在卡片外面、字距拉开、图标收敛成一根细线，
+ * 卡片只用「极淡描边 + 大圆角」立形，不挂投影（投影在浅灰底上会显脏）。
+ */
 @Composable
-private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(14.dp),
-        content = content
-    )
+private fun SettingsCard(
+    label: String,
+    icon: ImageVector,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.padding(start = 4.dp, bottom = 9.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                modifier = Modifier.size(15.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.8.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .border(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                    shape = RoundedCornerShape(20.dp)
+                )
+                .padding(horizontal = 16.dp, vertical = 15.dp),
+            content = content
+        )
+    }
 }
 
 /** 卡片内的一条分隔线 */
@@ -308,10 +356,11 @@ private fun SwitchRow(
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Medium
             )
-            Spacer(Modifier.height(3.dp))
+            Spacer(Modifier.height(4.dp))
             Text(
                 subtitle,
                 style = MaterialTheme.typography.labelSmall,
+                lineHeight = 16.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -320,43 +369,62 @@ private fun SwitchRow(
     }
 }
 
-/** 卡片内的一行操作（点击整行） */
+/** 卡片内的一行操作（点击整行）：正文色 + 右侧箭头，彩色只留给危险操作 */
 @Composable
 private fun ActionRow(
     text: String,
     error: Boolean = false,
     onClick: () -> Unit
 ) {
-    Text(
-        text,
-        style = MaterialTheme.typography.bodyMedium,
-        fontWeight = FontWeight.Medium,
-        color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-        modifier = Modifier
+    Row(
+        Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
-            .padding(vertical = 11.dp)
-    )
+            .padding(vertical = 11.dp, horizontal = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            color = if (error) MaterialTheme.colorScheme.error
+            else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
+        Icon(
+            Icons.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+            modifier = Modifier.size(18.dp)
+        )
+    }
 }
 
-/** 小胶囊按钮 */
+/** 小胶囊按钮：淡底 + 一圈更淡的描边，比纯色块克制 */
 @Composable
 private fun SmallButton(
     text: String,
     color: Color,
     onClick: () -> Unit
 ) {
+    val shape = RoundedCornerShape(10.dp)
     Box(
         Modifier
-            .height(30.dp)
-            .clip(RoundedCornerShape(15.dp))
-            .background(color.copy(alpha = 0.12f))
+            .height(32.dp)
+            .clip(shape)
+            .background(color.copy(alpha = 0.09f))
+            .border(1.dp, color.copy(alpha = 0.18f), shape)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(text, style = MaterialTheme.typography.labelMedium, color = color)
+        Text(
+            text,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Medium,
+            color = color
+        )
     }
 }
 

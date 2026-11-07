@@ -10,15 +10,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 /**
- * QQ 音乐风格的主题：
- * - 主色用音乐 App 标志性的绿（比默认蓝更有「听歌软件」的辨识度）；
+ * 中性黑白灰主题（去掉绿色强调色）：
+ * - 主色用近黑 / 近白，靠明度层次表达层级，不再靠彩色抢视线；
  * - 圆角整体放大，卡片 / 按钮更柔和有表达力（Material 3 的强项）；
- * - 深色不用纯黑，用接近 #121212 的深灰，长时间看更舒服、也更像 QQ / 网易云的暗色。
+ * - 深色不用纯黑，用接近 #121212 的深灰，长时间看更舒服。
+ * - error 红保留：那是危险操作的语义色，不属于品牌配色。
  */
 private val LightColors = lightColorScheme(
-    primary = Color(0xFF2EBD6B),
+    primary = Color(0xFF23272E),
     onPrimary = Color.White,
-    secondary = Color(0xFF1F8F5A),
+    secondary = Color(0xFF5C636D),
     // 卡片 / 面板用纯白，页面底色是很淡的灰 —— QQ 音乐就是这样分的
     surface = Color(0xFFFFFFFF),
     background = Color(0xFFF5F6F8),
@@ -29,9 +30,9 @@ private val LightColors = lightColorScheme(
 )
 
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFF4DD98B),
-    onPrimary = Color(0xFF00331E),
-    secondary = Color(0xFF8FE3B6),
+    primary = Color(0xFFE8EAEE),
+    onPrimary = Color(0xFF16181C),
+    secondary = Color(0xFFB4B9C2),
     surface = Color(0xFF1C1C1E),
     background = Color(0xFF121212),
     surfaceVariant = Color(0xFF2A2A2E),

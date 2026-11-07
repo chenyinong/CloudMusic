@@ -47,7 +47,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.cloudmusic.app.data.ProviderKind
@@ -91,8 +90,8 @@ fun LibraryScreen(
     var pendingDelete by remember { mutableStateOf<Track?>(null) }
 
     Scaffold(
-        // QQ 列表页是很淡的灰白底，不是纯白
-        containerColor = Color(0xFFF5F6F8),
+        // 跟主题走：写死浅灰底的话，暗色模式会变成「浅底 + 白字」，整页看不清
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             CenterAlignedTopAppBar(
                 title = {
@@ -103,7 +102,8 @@ fun LibraryScreen(
                     )
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = Color.Transparent
+                    // 实底：滚动时列表不会从标题后面透出来
+                    containerColor = MaterialTheme.colorScheme.background
                 ),
                 actions = {
                     IconButton(onClick = { vm.rescan() }) {
@@ -156,7 +156,7 @@ fun LibraryScreen(
                     Icon(
                         Icons.Filled.PlayArrow,
                         contentDescription = "全部播放",
-                        tint = Color.White,
+                        tint = MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -201,7 +201,7 @@ fun LibraryScreen(
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(
                                     if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                                    else Color(0xFFEBECEE)
+                                    else MaterialTheme.colorScheme.surfaceVariant
                                 )
                                 .clickable { onProviderFilterChange(id) }
                                 .padding(horizontal = 12.dp, vertical = 6.dp)

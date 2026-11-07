@@ -60,8 +60,10 @@ fun PlayerSeekBar(
     durationMs: Long,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
-    accent: Color = Color(0xFF2EBD6B),
+    // 不写死绿色：没传就跟着主题的中性主色走
+    accent: Color = Color.Unspecified,
 ) {
+    val accentColor = if (accent == Color.Unspecified) MaterialTheme.colorScheme.primary else accent
     BoxWithConstraints(
         modifier
             .fillMaxWidth()
@@ -122,7 +124,7 @@ fun PlayerSeekBar(
             // 已播放
             val end = left + (right - left) * shown
             drawLine(
-                color = accent,
+                color = accentColor,
                 start = Offset(left, cy),
                 end = Offset(end, cy),
                 strokeWidth = track,

@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
@@ -23,7 +24,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -31,7 +31,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -67,7 +66,7 @@ fun PlaylistImportScreen(
                 )
             },
             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                containerColor = Color.Transparent
+                containerColor = MaterialTheme.colorScheme.background
             ),
             navigationIcon = {
                 IconButton(onClick = onBack) {
@@ -77,17 +76,23 @@ fun PlaylistImportScreen(
         )
 
         Column(Modifier.padding(horizontal = 16.dp)) {
-            // 搜索框独占一行。
-            // OutlinedTextField 有 280dp 的最小宽度，跟按钮挤一行时窄屏上按钮会被推出屏幕。
-            OutlinedTextField(
+            // 和曲库 / 歌单列表页用同一个圆角灰底输入框，不再是 Material 那个
+            // 带粗描边 + 浮动 label 的老式 OutlinedTextField，整页格式统一。
+            Text(
+                "歌单链接或 ID",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, top = 6.dp, bottom = 9.dp)
+            )
+            SearchField(
                 value = vm.input,
                 onValueChange = { vm.input = it },
-                label = { Text("歌单链接或 id") },
-                placeholder = { Text("网易云 / QQ 音乐的歌单") },
-                singleLine = true,
+                placeholder = "粘贴网易云 / QQ 音乐歌单链接或 ID",
+                leadingIcon = Icons.Filled.Link,
                 modifier = Modifier.fillMaxWidth()
             )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(12.dp))
             Button(
                 onClick = { vm.load() },
                 enabled = !vm.loading,

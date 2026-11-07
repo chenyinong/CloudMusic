@@ -292,6 +292,8 @@ fun SearchField(
     onValueChange: (String) -> Unit,
     placeholder: String,
     modifier: Modifier = Modifier,
+    /** 输入框左侧图标：搜索页用放大镜，链接输入框传链接图标 */
+    leadingIcon: ImageVector = Icons.Filled.Search,
     onImeSearch: (() -> Unit)? = null,
     trailing: @Composable (() -> Unit)? = null,
 ) {
@@ -304,7 +306,7 @@ fun SearchField(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
-            Icons.Filled.Search,
+            leadingIcon,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(18.dp)
