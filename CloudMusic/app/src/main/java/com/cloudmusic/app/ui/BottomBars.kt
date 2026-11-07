@@ -1,7 +1,9 @@
 package com.cloudmusic.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -112,16 +114,23 @@ fun MiniPlayerBar(
         }
     }
 
+    // 磨砂玻璃：半透明底色 + 内侧高光描边（身后内容会透出来，滚动时玻璃感更足）。
+    // 真·背景实时模糊要 API 31+（RenderEffect）/ haze 库；这里用「半透明 + 描边」达到等效观感，
+    // 全版本可见。深色模式换成深玻璃，否则白玻璃在深底上会发灰发脏。
+    val isDark = isSystemInDarkTheme()
+    val glassTint = if (isDark) Color(0xFF1C1F26) else Color.White
+    val glassStroke = if (isDark) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.6f)
     Surface(
-        // 浮岛：左右和底部留边距，四角都圆，盖在内容上面像一块悬浮的卡片
+        // 浮岛：左右和底部留边距，四角都圆，盖在内容上面像一块悬浮的玻璃卡片
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp)
-            .padding(bottom = 8.dp),
-        color = MaterialTheme.colorScheme.surface,
-        // 同上：色调叠加会发绿，这里只留投影
+            .padding(bottom = 8.dp)
+            .border(1.dp, glassStroke, RoundedCornerShape(18.dp)),
+        color = glassTint.copy(alpha = 0.32f),
+        // 色调叠加会发绿，这里只留投影
         tonalElevation = 0.dp,
-        shadowElevation = 14.dp,
+        shadowElevation = 12.dp,
         shape = RoundedCornerShape(18.dp),
     ) {
         Column {
@@ -129,7 +138,7 @@ fun MiniPlayerBar(
                 Modifier
                     .fillMaxWidth()
                     .height(2.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .background(glassTint.copy(alpha = 0.45f))
             ) {
                 Box(
                     Modifier

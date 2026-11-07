@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>mini 播放器 · 并排对比</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+         background:#eef1f4; color:#1c1e21; padding:28px; }
+  .caption { text-align:center; font-size:15px; margin-bottom:22px; }
+  .stage { display:flex; gap:40px; justify-content:center; align-items:flex-start; flex-wrap:wrap; }
+  .col { display:flex; flex-direction:column; gap:10px; align-items:center; }
+  .col h3 { font-size:14px; font-weight:700; }
+  .col h3 span { font-size:12px; font-weight:400; color:#7d8590; }
+
+  .phone { width:374px; height:706px; background:#f6f7f8; border-radius:34px;
+           border:9px solid #14161a; overflow:hidden; position:relative;
+           box-shadow:0 16px 44px rgba(0,0,0,.25); }
+  .page { position:absolute; inset:0; overflow:hidden; }
+
+  .head { padding:22px 20px 10px; }
+  .tag { display:flex; align-items:center; gap:8px; font-size:19px; font-weight:700; }
+  .tag i { width:5px; height:20px; border-radius:3px; background:#1e9e5a; display:inline-block; }
+
+  .row { display:flex; align-items:center; gap:12px; padding:11px 20px; }
+  .cv { width:46px; height:46px; border-radius:50%; flex-shrink:0; }
+  .tt { font-size:15px; font-weight:600; }
+  .ar { font-size:12.5px; color:#8a929c; margin-top:2px; }
+  .pad { height:230px; }
+
+  /* 现状：不透明白卡 */
+  .bar-solid {
+    position:absolute; left:10px; right:10px; bottom:60px; z-index:10;
+    border-radius:18px; overflow:hidden; background:#ffffff;
+    box-shadow:0 6px 20px rgba(0,0,0,.16);
+  }
+  /* 改后：磨砂玻璃（更透） */
+  .bar-frost {
+    position:absolute; left:10px; right:10px; bottom:60px; z-index:10;
+    border-radius:18px; overflow:hidden;
+    background:rgba(255,255,255,.32);
+    -webkit-backdrop-filter:blur(24px) saturate(1.9);
+    backdrop-filter:blur(24px) saturate(1.9);
+    box-shadow:0 6px 22px rgba(0,0,0,.13), inset 0 0 0 1px rgba(255,255,255,.6);
+  }
+
+  .bar .prog { height:2.5px; background:rgba(0,0,0,.10); }
+  .bar .prog i { display:block; height:100%; width:38%; background:#1e9e5a; }
+  .bar .inner { display:flex; align-items:center; padding:8px 6px 8px 12px; }
+  .cover { width:42px; height:42px; border-radius:50%; flex-shrink:0;
+    background:radial-gradient(circle at 32% 28%,#5ab3ff,#1668d8 68%);
+    display:flex; align-items:center; justify-content:center; }
+  .meta { flex:1; min-width:0; padding:0 10px; }
+  .meta .t { font-size:14.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .meta .a { font-size:12.5px; color:#5a626d; margin-top:1px; }
+  .ctrl { display:flex; align-items:center; gap:1px; padding-right:2px; }
+  .ctrl svg { width:24px; height:24px; padding:5px; }
+  .ctrl svg path { fill:#3c424b; }
+  .ctrl svg.hl path { fill:#1e9e5a; }
+  .ctrl svg.dim { opacity:.35; }
+
+  .note { max-width:820px; margin:24px auto 0; font-size:12.5px; color:#6b7480; line-height:1.9;
+          background:#fff; border-radius:12px; padding:14px 18px; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+  .note b { color:#1c1e21; }
+</style>
+</head>
+<body>
+  <div class="caption">底部 mini 播放器 · 并排对比（左：现状白卡 ／ 右：磨砂透明，已调更透）</div>
+
+  <div class="stage">
+    <div class="col">
+      <h3>现状 <span>· 不透明白卡</span></h3>
+      <div class="phone">
+        <div class="page">
+          <div class="head"><div class="tag"><i></i>理想</div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#7fd6a4,#1e9e5a)"></div><div><div class="tt">理想</div><div class="ar">赵雷</div></div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#5ab3ff,#1668d8)"></div><div><div class="tt">成都</div><div class="ar">赵雷</div></div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#f0c069,#d88a1e)"></div><div><div class="tt">南方姑娘</div><div class="ar">赵雷</div></div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#b39aff,#7a5bd6)"></div><div><div class="tt">安河桥</div><div class="ar">宋冬野</div></div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#7fb6ff,#2e7fd8)"></div><div><div class="tt">斑马斑马</div><div class="ar">宋冬野</div></div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#ff9d9d,#d85a5a)"></div><div><div class="tt">山丘</div><div class="ar">李宗盛</div></div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#7fd6d6,#1fa3a3)"></div><div><div class="tt">贝加尔湖畔</div><div class="ar">李健</div></div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#a8c47f,#5a6d3a)"></div><div><div class="tt">平凡之路</div><div class="ar">朴树</div></div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#f0b393,#d87f5a)"></div><div><div class="tt">那些花儿</div><div class="ar">朴树</div></div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#5ab3ff,#1668d8)"></div><div><div class="tt">克卜勒</div><div class="ar">孙燕姿</div></div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#b39aff,#7a5bd6)"></div><div><div class="tt">我怀念的</div><div class="ar">孙燕姿</div></div></div>
+          <div class="pad"></div>
+        </div>
+        <div class="bar bar-solid">
+          <div class="prog"><i></i></div>
+          <div class="inner">
+            <div class="cover"><svg viewBox="0 0 24 24" width="20" height="20"><path fill="#fff" d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></svg></div>
+            <div class="meta"><div class="t">克卜勒</div><div class="a">孙燕姿</div></div>
+            <div class="ctrl">
+              <svg viewBox="0 0 24 24" class="dim"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+              <svg viewBox="0 0 24 24" class="hl"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+              <svg viewBox="0 0 24 24" class="dim"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+              <svg viewBox="0 0 24 24" class="dim"><path d="M3 6h12v2H3zm0 4h12v2H3zm0 4h8v-2H3zm14-4v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V10h3V8h-5z" transform="scale(.88) translate(1.6 1.6)"/></svg>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col">
+      <h3>改后 <span>· 磨砂透明（更透）</span></h3>
+      <div class="phone">
+        <div class="page">
+          <div class="head"><div class="tag"><i></i>理想</div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#7fd6a4,#1e9e5a)"></div><div><div class="tt">理想</div><div class="ar">赵雷</div></div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#5ab3ff,#1668d8)"></div><div><div class="tt">成都</div><div class="ar">赵雷</div></div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#f0c069,#d88a1e)"></div><div><div class="tt">南方姑娘</div><div class="ar">赵雷</div></div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#b39aff,#7a5bd6)"></div><div><div class="tt">安河桥</div><div class="ar">宋冬野</div></div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#7fb6ff,#2e7fd8)"></div><div><div class="tt">斑马斑马</div><div class="ar">宋冬野</div></div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#ff9d9d,#d85a5a)"></div><div><div class="tt">山丘</div><div class="ar">李宗盛</div></div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#7fd6d6,#1fa3a3)"></div><div><div class="tt">贝加尔湖畔</div><div class="ar">李健</div></div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#a8c47f,#5a6d3a)"></div><div><div class="tt">平凡之路</div><div class="ar">朴树</div></div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#f0b393,#d87f5a)"></div><div><div class="tt">那些花儿</div><div class="ar">朴树</div></div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#5ab3ff,#1668d8)"></div><div><div class="tt">克卜勒</div><div class="ar">孙燕姿</div></div></div>
+          <div class="row"><div class="cv" style="background:linear-gradient(135deg,#b39aff,#7a5bd6)"></div><div><div class="tt">我怀念的</div><div class="ar">孙燕姿</div></div></div>
+          <div class="pad"></div>
+        </div>
+        <div class="bar bar-frost">
+          <div class="prog"><i></i></div>
+          <div class="inner">
+            <div class="cover"><svg viewBox="0 0 24 24" width="20" height="20"><path fill="#fff" d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></svg></div>
+            <div class="meta"><div class="t">克卜勒</div><div class="a">孙燕姿</div></div>
+            <div class="ctrl">
+              <svg viewBox="0 0 24 24" class="dim"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+              <svg viewBox="0 0 24 24" class="hl"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+              <svg viewBox="0 0 24 24" class="dim"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+              <svg viewBox="0 0 24 24" class="dim"><path d="M3 6h12v2H3zm0 4h12v2H3zm0 4h8v-2H3zm14-4v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V10h3V8h-5z" transform="scale(.88) translate(1.6 1.6)"/></svg>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>改动只在底部这条：</b>左图是现在的实心白卡；右图换成半透明白(32%) + 背景模糊(blur 24px) + 内侧高光描边，比上一版更透。<br>
+    磨砂透出身后内容再糊掉，所以背景越花越明显——两图都用你截图的曲库页，底部那条正下方压着彩色封面，右图能看到淡淡的颜色透进玻璃里。真机上滚动歌词/封面时玻璃感更足。<br>
+    确认 OK 我就照这个改 <code>BottomBars.kt</code> 的 <code>MiniPlayerBar</code>；还想再透/再淡或调模糊强度也直接说。
+  </div>
+</body>
+</html>
