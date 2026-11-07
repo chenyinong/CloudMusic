@@ -6,10 +6,13 @@ import com.cloudmusic.app.data.UploadResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSink
 import org.json.JSONObject
 import java.io.File
 
@@ -50,6 +53,29 @@ class OneDriveUploader(
 
         /** 跟 WebDAV 上传那边共用一个 TAG，一条命令就能把两边的日志都捞出来 */
         private const val TAG = "CloudMusicUpload"
+    }
+
+    /**
+     * 包一层的请求体，只为了把「传 body」这段时间掐出来。
+     *
+     * 「上传慢」有好几种完全不同的原因：
+     * 建连慢（DNS/握手）、传得慢（带宽）、等微软处理慢（服务端）。
+     * 光看总耗时分不出来 —— 有了 body 的起止时间，三段就能拆开。
+     */
+    private class TimedBody(
+        private val delegate: RequestBody,
+        private val onTiming: (bodyStartNs: Long, bodyEndNs: Long) -> Unit,
+    ) : RequestBody() {
+        override fun contentType(): MediaType? = delegate.contentType()
+        override fun contentLength(): Long = delegate.contentLength()
+        override fun writeTo(sink: BufferedSink) {
+            val s = System.nanoTime()
+            try {
+                delegate.writeTo(sink)
+            } finally {
+                onTiming(s, System.nanoTime())
+            }
+        }
     }
 
     /**
@@ -102,18 +128,36 @@ class OneDriveUploader(
         file: File,
         onProgress: ((sent: Long, total: Long) -> Unit)?,
     ): UploadResult {
-        val body = com.cloudmusic.app.data.progressRequestBody(
+        val raw = com.cloudmusic.app.data.progressRequestBody(
             file, "application/octet-stream", onProgress
         )
         // 并发导入之后，微软限流（429）就常见了 —— 值得退避再试。
         repeat(3) { attempt ->
+            // 把 body 的起止时间掐出来，好跟「等响应」分开算
+            var bodyStart = 0L
+            var bodyEnd = 0L
+            val body = TimedBody(raw) { s, e ->
+                bodyStart = s
+                bodyEnd = e
+            }
             val request = Request.Builder()
                 .url(contentUrl(folderId, fileName))
                 .put(body)
                 .header("Authorization", "Bearer $token")
                 .build()
+            val t0 = System.nanoTime()
             try {
                 http.newCall(request).execute().use { resp ->
+                    val tResp = System.nanoTime()
+                    // 三段拆开：建连（含 DNS/握手）· 传 body · 等微软处理
+                    val connectMs = if (bodyStart > 0) (bodyStart - t0) / 1_000_000 else -1
+                    val bodyMs = if (bodyEnd > bodyStart) (bodyEnd - bodyStart) / 1_000_000 else -1
+                    val waitMs = if (bodyEnd > 0) (tResp - bodyEnd) / 1_000_000 else -1
+                    Log.i(
+                        TAG,
+                        "上传请求 $fileName：建连 ${connectMs}ms · 传 body ${bodyMs}ms · " +
+                            "等响应 ${waitMs}ms · 共 ${(tResp - t0) / 1_000_000}ms"
+                    )
                     if (resp.isSuccessful) {
                         val id = runCatching {
                             JSONObject(resp.body?.string().orEmpty()).optString("id")

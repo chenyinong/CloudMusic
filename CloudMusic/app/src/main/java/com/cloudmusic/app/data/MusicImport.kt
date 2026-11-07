@@ -205,6 +205,26 @@ class MusicSearchRepository(
     private val quarkSource: com.cloudmusic.app.data.playlist.LiumingyeAudioSource? = null,
 ) {
 
+    /**
+     * 分段下载专用的客户端。
+     *
+     * 单独派生一个是为了把「单主机并发数」调高 ——
+     * OkHttp 默认只允许 5 个并发请求连同一个主机，切成 8 段的话
+     * 后面的 3 段会排队等着，白切。
+     *
+     * 连接池是共享的（`newBuilder()` 会带上），所以不会有额外的握手开销。
+     */
+    private val segHttp: OkHttpClient by lazy {
+        http.newBuilder()
+            .dispatcher(
+                okhttp3.Dispatcher().apply {
+                    maxRequests = 20
+                    maxRequestsPerHost = 12
+                }
+            )
+            .build()
+    }
+
     companion object {
         private const val TAG = "CloudMusicImport"
         private const val HOST = "https://music.163.com"
@@ -238,7 +258,7 @@ class MusicSearchRepository(
          *
          * OkHttp 单个主机默认最多 5 个并发请求，再多就排队了，白切。
          */
-        private const val MAX_SEGMENTS = 4
+        private const val MAX_SEGMENTS = 8
 
         /**
          * 小于这个体积就不并发分了。
@@ -688,7 +708,7 @@ class MusicSearchRepository(
             .header("Range", "bytes=0-0")
             .build()
         val total = try {
-            http.newCall(probeReq).execute().use { resp ->
+            segHttp.newCall(probeReq).execute().use { resp ->
                 if (resp.code != 206) {
                     Log.i(TAG, "并发下载：探测返回 HTTP ${resp.code}，这条直链不支持分段")
                     return false
@@ -786,7 +806,8 @@ class MusicSearchRepository(
                 .header("Range", "bytes=$start-$end")
                 .build()
             try {
-                http.newCall(req).execute().use { resp ->
+                val tSeg = System.nanoTime()
+                segHttp.newCall(req).execute().use { resp ->
                     if (resp.code != 206) {
                         lastErr = "HTTP ${resp.code}"
                         return@use
@@ -824,6 +845,12 @@ class MusicSearchRepository(
                         lastErr = "只下了 ${pos - start}/${end - start + 1} 字节"
                         return@use
                     }
+                    val segMs = elapsedMs(tSeg)
+                    Log.i(
+                        TAG,
+                        "  第 $index 段 $start-$end 下齐 ${end - start + 1} 字节 " +
+                            "${segMs}ms ${(end - start + 1) * 1000 / segMs.coerceAtLeast(1)}B/s"
+                    )
                     return null
                 }
             } catch (e: Exception) {
