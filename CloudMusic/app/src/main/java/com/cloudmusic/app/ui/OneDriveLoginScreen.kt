@@ -2,6 +2,9 @@ package com.cloudmusic.app.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -32,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
@@ -190,6 +195,9 @@ fun OneDriveLoginScreen(
         if (clientId.trim() == OneDriveAuth.BUILTIN_CLIENT_ID) {
             Spacer(Modifier.height(12.dp))
             Card(
+                // Card 默认 elevation=1dp，会把主题色叠到卡面上（泛绿）。归零后用描边分层
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp, focusedElevation = 0.dp, hoveredElevation = 0.dp, draggedElevation = 0.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.errorContainer
                 )
@@ -217,6 +225,8 @@ fun OneDriveLoginScreen(
         Spacer(Modifier.height(20.dp))
 
         Card(
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp, focusedElevation = 0.dp, hoveredElevation = 0.dp, draggedElevation = 0.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant
             )
@@ -269,16 +279,24 @@ fun OneDriveLoginScreen(
 
         Text("你的账号类型", fontWeight = FontWeight.Medium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(
-                selected = accountKind != "work",
-                onClick = { onAccountKindChange("personal") },
-                label = { Text("个人账号") }
-            )
-            FilterChip(
-                selected = accountKind == "work",
-                onClick = { onAccountKindChange("work") },
-                label = { Text("单位账号") }
-            )
+            // 轻胶囊，不用 FilterChip —— 它选中的底色是带色调的 secondaryContainer
+            listOf("personal" to "个人账号", "work" to "单位账号").forEach { (kind, label) ->
+                val selected = accountKind == kind
+                Text(
+                    label,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (selected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                            else MaterialTheme.colorScheme.surfaceVariant
+                        )
+                        .clickable { onAccountKindChange(kind) }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
         }
         Text(
             if (accountKind == "work") {
@@ -295,10 +313,20 @@ fun OneDriveLoginScreen(
         Text("请求的权限", fontWeight = FontWeight.Medium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OneDriveScope.entries.forEach { s ->
-                FilterChip(
-                    selected = scopeMode == s.mode,
-                    onClick = { onScopeModeChange(s.mode) },
-                    label = { Text(s.label) }
+                val selected = scopeMode == s.mode
+                Text(
+                    s.label,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (selected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                            else MaterialTheme.colorScheme.surfaceVariant
+                        )
+                        .clickable { onScopeModeChange(s.mode) }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
                 )
             }
         }
@@ -327,6 +355,8 @@ fun OneDriveLoginScreen(
 
         if (deviceCode != null) {
             Card(
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp, focusedElevation = 0.dp, hoveredElevation = 0.dp, draggedElevation = 0.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
                 )
@@ -516,6 +546,8 @@ fun OneDriveLoginScreen(
 
         if (error != null) {
             Card(
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp, focusedElevation = 0.dp, hoveredElevation = 0.dp, draggedElevation = 0.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.errorContainer
                 )
@@ -584,6 +616,8 @@ fun OneDriveLoginScreen(
 @Composable
 private fun TutorialCard() {
     Card(
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp, focusedElevation = 0.dp, hoveredElevation = 0.dp, draggedElevation = 0.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         )

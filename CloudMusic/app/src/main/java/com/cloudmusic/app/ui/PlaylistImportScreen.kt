@@ -1,5 +1,7 @@
 package com.cloudmusic.app.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,22 +13,25 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -48,9 +53,22 @@ fun PlaylistImportScreen(
 ) {
     val vm: PlaylistImportViewModel = viewModel()
 
-    Column(Modifier.fillMaxSize()) {
-        TopAppBar(
-            title = { Text("导入歌单") },
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        CenterAlignedTopAppBar(
+            title = {
+                Text(
+                    "导入歌单",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium
+                )
+            },
+            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                containerColor = Color.Transparent
+            ),
             navigationIcon = {
                 IconButton(onClick = onBack) {
                     Icon(Icons.Filled.ArrowBack, contentDescription = "返回")
@@ -95,16 +113,27 @@ fun PlaylistImportScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = vm.platformChoice == null || vm.platformChoice == PlaylistPlatform.NETEASE,
-                        onClick = { vm.platformChoice = PlaylistPlatform.NETEASE },
-                        label = { Text("网易云") }
-                    )
-                    FilterChip(
-                        selected = vm.platformChoice == PlaylistPlatform.QQ,
-                        onClick = { vm.platformChoice = PlaylistPlatform.QQ },
-                        label = { Text("QQ音乐") }
-                    )
+                    // 轻量小胶囊
+                    listOf(
+                        PlaylistPlatform.NETEASE to "网易云",
+                        PlaylistPlatform.QQ to "QQ音乐"
+                    ).forEach { (p, label) ->
+                        val selected = vm.platformChoice == null || vm.platformChoice == p
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (selected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                    else MaterialTheme.colorScheme.surfaceVariant
+                                )
+                                .clickable { vm.platformChoice = p }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                    }
                 }
                 Spacer(Modifier.height(6.dp))
             }

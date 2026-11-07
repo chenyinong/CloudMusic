@@ -43,6 +43,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -111,11 +113,16 @@ fun MiniPlayerBar(
     }
 
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        // 浮岛：左右和底部留边距，四角都圆，盖在内容上面像一块悬浮的卡片
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp)
+            .padding(bottom = 8.dp),
         color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 3.dp,
-        shadowElevation = 12.dp,
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        // 同上：色调叠加会发绿，这里只留投影
+        tonalElevation = 0.dp,
+        shadowElevation = 14.dp,
+        shape = RoundedCornerShape(18.dp),
     ) {
         Column {
             Box(
@@ -264,9 +271,11 @@ fun BottomTabBar(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 2.dp,
-        shadowElevation = 8.dp,
+        // 和列表页用同一个底色；tonalElevation 必须为 0 ——
+        // M3 的 Surface 会把主题色按高度叠上去，一叠就发绿，跟页面不搭
+        color = MaterialTheme.colorScheme.background,
+        tonalElevation = 0.dp,
+        shadowElevation = 6.dp,
     ) {
         Row(
             Modifier
@@ -282,10 +291,15 @@ fun BottomTabBar(
                 val selected = current == tab.screen
                 val tint = if (selected) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onSurfaceVariant
+                val interactionSource = remember { MutableInteractionSource() }
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .clickable { onSelect(tab.screen) },
+                        .clickable(
+                            interactionSource = interactionSource,
+                            indication = null,
+                            role = Role.Tab
+                        ) { onSelect(tab.screen) },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {

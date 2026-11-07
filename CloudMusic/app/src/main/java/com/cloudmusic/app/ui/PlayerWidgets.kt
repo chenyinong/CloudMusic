@@ -60,7 +60,7 @@ fun PlayerSeekBar(
     durationMs: Long,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
-    accent: Color = Color(0xFFE64A4A),
+    accent: Color = Color(0xFF2EBD6B),
 ) {
     BoxWithConstraints(
         modifier
@@ -76,6 +76,9 @@ fun PlayerSeekBar(
         // 拖动时用手指位置，不跟播放进度抢
         var dragging by remember { mutableStateOf<Float?>(null) }
         val shown = dragging ?: progress
+
+        val trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
+        val knobColor = MaterialTheme.colorScheme.onSurface
 
         Canvas(
             Modifier
@@ -110,7 +113,7 @@ fun PlayerSeekBar(
 
             // 底轨
             drawLine(
-                color = Color.White.copy(alpha = 0.28f),
+                color = trackColor,
                 start = Offset(left, cy),
                 end = Offset(right, cy),
                 strokeWidth = track,
@@ -126,7 +129,7 @@ fun PlayerSeekBar(
                 cap = StrokeCap.Round,
             )
             // 圆点
-            drawCircle(color = Color.White, radius = knob * 0.55f, center = Offset(end, cy))
+            drawCircle(color = knobColor, radius = knob * 0.55f, center = Offset(end, cy))
         }
     }
 }
@@ -159,9 +162,9 @@ fun PlayerControlBar(
                 },
                 contentDescription = "循环模式",
                 tint = if (repeatMode == Player.REPEAT_MODE_OFF) {
-                    Color.White.copy(alpha = 0.45f)
+                    MaterialTheme.colorScheme.onSurfaceVariant
                 } else {
-                    Color.White
+                    MaterialTheme.colorScheme.primary
                 },
                 modifier = Modifier.size(22.dp)
             )
@@ -171,25 +174,25 @@ fun PlayerControlBar(
             Icon(
                 Icons.Filled.SkipPrevious,
                 contentDescription = "上一首",
-                tint = Color.White,
+                tint = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.size(34.dp)
             )
         }
 
-        // 播放 / 暂停：白色实心圆
+        // 播放 / 暂停：黑色大圆 + 白三角（QQ 音乐样式）
         Box(
             Modifier
-                .size(62.dp)
+                .size(70.dp)
                 .clip(CircleShape)
-                .background(Color.White),
+                .background(MaterialTheme.colorScheme.onSurface),
             contentAlignment = Alignment.Center
         ) {
-            IconButton(onClick = onToggle, modifier = Modifier.size(62.dp)) {
+            IconButton(onClick = onToggle, modifier = Modifier.size(70.dp)) {
                 Icon(
                     imageVector = if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                     contentDescription = if (playing) "暂停" else "播放",
-                    tint = Color(0xFF1F1F1F),
-                    modifier = Modifier.size(34.dp)
+                    tint = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.size(36.dp)
                 )
             }
         }
@@ -198,7 +201,7 @@ fun PlayerControlBar(
             Icon(
                 Icons.Filled.SkipNext,
                 contentDescription = "下一首",
-                tint = Color.White,
+                tint = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.size(34.dp)
             )
         }
@@ -207,7 +210,7 @@ fun PlayerControlBar(
             Icon(
                 Icons.Filled.QueueMusic,
                 contentDescription = "播放列表",
-                tint = Color.White,
+                tint = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.size(22.dp)
             )
         }
@@ -225,6 +228,13 @@ fun PlayerBottomBar(
     onSettings: () -> Unit,
     onMore: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * 「更多」按钮旁边挂的菜单。
+     *
+     * 菜单必须挂在按钮自己身上（Popup 以所在位置为锚点），
+     * 否则点底部的按钮、菜单却跑到顶栏那儿去了。
+     */
+    moreMenu: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier
@@ -237,13 +247,18 @@ fun PlayerBottomBar(
         BottomBarItem(Icons.Filled.Lyrics, "歌词", onLyrics)
         BottomBarItem(Icons.Filled.Info, "信息", onInfo)
         BottomBarItem(Icons.Filled.Settings, "设置", onSettings)
-        BottomBarItem(Icons.Filled.MoreHoriz, "更多", onMore)
+        BottomBarItem(Icons.Filled.MoreHoriz, "更多", onMore, trailing = moreMenu)
     }
 }
 
 /** 底部功能栏的一格：图标 + 下面一行小字。 */
 @Composable
-private fun BottomBarItem(icon: ImageVector, label: String, onClick: () -> Unit) {
+private fun BottomBarItem(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    trailing: (@Composable () -> Unit)? = null,
+) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
@@ -251,12 +266,14 @@ private fun BottomBarItem(icon: ImageVector, label: String, onClick: () -> Unit)
             .padding(4.dp)
     ) {
         IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) {
-            Icon(icon, contentDescription = label, tint = Color.White.copy(alpha = 0.85f))
+            Icon(icon, contentDescription = label, tint = MaterialTheme.colorScheme.onSurface)
         }
         Text(
             label,
             style = MaterialTheme.typography.labelSmall,
-            color = Color.White.copy(alpha = 0.6f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        // 菜单放在文字下面，这样 Popup 的锚点就在这一格的底部，菜单正好浮在按钮下方
+        trailing?.invoke()
     }
 }

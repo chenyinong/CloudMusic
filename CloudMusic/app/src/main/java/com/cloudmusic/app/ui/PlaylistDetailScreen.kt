@@ -6,6 +6,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -20,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
@@ -27,9 +29,9 @@ import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -38,7 +40,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -48,6 +50,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -91,18 +95,24 @@ fun PlaylistDetailScreen(
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TopAppBar(
+            CenterAlignedTopAppBar(
                 title = {
                     // 歌单头滑出视野之后，顶栏才顶上歌单名（跟网易云一个做法）
                     if (headerGone) {
                         Text(
                             vm.playlist?.name ?: "歌单",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
                 },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = Color.Transparent
+                ),
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Filled.ArrowBack, contentDescription = "返回")
@@ -135,11 +145,10 @@ fun PlaylistDetailScreen(
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.background)
                 ) {
-                    OutlinedTextField(
+                    SearchField(
                         value = vm.query,
                         onValueChange = { vm.query = it },
-                        label = { Text("在这张歌单里找") },
-                        singleLine = true,
+                        placeholder = "在这张歌单里找",
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 6.dp)
@@ -163,13 +172,13 @@ fun PlaylistDetailScreen(
                         Surface(
                             shape = CircleShape,
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier.size(30.dp)
                         ) {
                             Icon(
                                 Icons.Filled.PlayArrow,
                                 contentDescription = "播放全部",
                                 tint = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.padding(9.dp)
+                                modifier = Modifier.padding(7.dp)
                             )
                         }
                         Spacer(Modifier.width(10.dp))
@@ -250,6 +259,7 @@ fun PlaylistDetailScreen(
     vm.pendingConfirm?.let { p ->
         AlertDialog(
             onDismissRequest = { vm.cancelPending() },
+            containerColor = MaterialTheme.colorScheme.surface,
             title = { Text("确认一下") },
             text = { Text("${p.track.title} - ${p.track.artist}\n\n${p.reason}") },
             confirmButton = {
@@ -266,6 +276,7 @@ fun PlaylistDetailScreen(
         var dirText by remember(vm.dir) { mutableStateOf(vm.dir) }
         AlertDialog(
             onDismissRequest = { showTarget = false },
+            containerColor = MaterialTheme.colorScheme.surface,
             title = { Text("歌曲存到哪") },
             text = {
                 Column {
@@ -275,10 +286,20 @@ fun PlaylistDetailScreen(
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         providers.forEach { p ->
-                            FilterChip(
-                                selected = vm.providerId == p.id,
-                                onClick = { vm.setProvider(p) },
-                                label = { Text(p.shortLabel) }
+                            val selected = vm.providerId == p.id
+                            Text(
+                                p.shortLabel,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (selected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(
+                                        if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                        else MaterialTheme.colorScheme.surfaceVariant
+                                    )
+                                    .clickable { vm.setProvider(p) }
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
                             )
                         }
                     }
@@ -314,6 +335,7 @@ fun PlaylistDetailScreen(
     if (showDelete) {
         AlertDialog(
             onDismissRequest = { showDelete = false },
+            containerColor = MaterialTheme.colorScheme.surface,
             title = { Text("删掉这张歌单？") },
             text = {
                 Text("只删 App 里的这张歌单清单，已经导进网盘的歌曲不会动。")
@@ -351,8 +373,8 @@ private fun PlaylistHeader(
     ) {
         GradientCover(
             vm.playlist?.name.orEmpty(),
-            size = 84.dp,
-            corner = 10.dp
+            size = 96.dp,
+            corner = 16.dp
         )
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
@@ -491,21 +513,43 @@ private fun DetailTrackRow(
                 Text(phase?.text.orEmpty(), style = MaterialTheme.typography.labelMedium)
             }
             // 已经进网盘了，能播就给「播放」
-            playable -> Button(onClick = onPlay) {
-                Icon(
-                    Icons.Filled.PlayArrow,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
+            // 不用 Material 的 Button —— 默认 40dp 高、带三角图标，太占地方。
+            // 自己画个小胶囊，去掉箭头只留文字。
+            playable -> Box(
+                Modifier
+                    .height(30.dp)
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(MaterialTheme.colorScheme.primary)
+                    .clickable(onClick = onPlay)
+                    .padding(horizontal = 14.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    if (playing) "播放中" else "播放",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onPrimary
                 )
-                Spacer(Modifier.width(2.dp))
-                Text(if (playing) "播放中" else "播放")
             }
             done -> Text(
                 phase?.text?.takeIf { it.isNotBlank() } ?: "已在网盘",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary
             )
-            else -> Button(onClick = onImport) { Text("导入") }
+            else -> Box(
+                Modifier
+                    .height(30.dp)
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(MaterialTheme.colorScheme.primary)
+                    .clickable(onClick = onImport)
+                    .padding(horizontal = 14.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "导入",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+            }
         }
     }
 }

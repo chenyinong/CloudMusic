@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.activity.compose.BackHandler
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -50,6 +51,47 @@ fun CloudMusicRoot(vm: AppViewModel) {
      * 停在唱片页。两个入口不一样，所以这个状态得单独记。
      */
     var openAtLyrics by remember { mutableStateOf(false) }
+    /**
+     * 播放页是从哪个页面进来的 —— 返回时得回到那儿。
+     *
+     * 之前返回写死回「我的」，从歌单里点歌播放再返回就直接跳回曲库了，
+     * 用户明明在歌单里，回不回去歌单很别扭。
+     */
+    var playerOrigin by remember { mutableStateOf(Screen.LIBRARY) }
+
+    // 播放页返回：回到进来之前的那一页
+    val backFromPlayer: () -> Unit = {
+        openAtLyrics = false
+        vm.screen = playerOrigin
+        // 在歌单里导了歌就顺手刷新一下曲库
+        if (playerOrigin == Screen.PLAYLIST_DETAIL) vm.rescanAfterImport()
+    }
+
+    /**
+     * 系统返回键 / 侧滑返回手势。
+     *
+     * 这些页面是 Compose 自己画的栈（不是 Activity 栈），不接的话
+     * 系统返回会直接把 App 关掉，而不是回到上一页。
+     */
+    BackHandler(enabled = vm.screen != Screen.LIBRARY && vm.screen != Screen.LOGIN) {
+        when (vm.screen) {
+            Screen.PLAYER -> backFromPlayer()
+            Screen.IMPORT -> {
+                vm.screen = Screen.LIBRARY
+                vm.rescanAfterImport()
+            }
+            Screen.PLAYLIST_IMPORT -> vm.screen = Screen.LIBRARY
+            Screen.PLAYLIST_LIST -> vm.screen = Screen.LIBRARY
+            Screen.PLAYLIST_DETAIL -> {
+                vm.screen = Screen.PLAYLIST_LIST
+                vm.rescanAfterImport()
+            }
+            Screen.SETTINGS -> vm.screen = Screen.LIBRARY
+            Screen.QUARK_LOGIN -> vm.screen = Screen.SETTINGS
+            Screen.QUARK_DIAG -> vm.screen = Screen.SETTINGS
+            else -> {}
+        }
+    }
     // 投屏状态机：跟播放页是同一个实例（同一个 Activity 的 ViewModelStore），
     // 迷你播放器靠它知道「现在控制权在电视身上」
     val dlnaVm: DlnaViewModel = viewModel()
@@ -69,7 +111,7 @@ fun CloudMusicRoot(vm: AppViewModel) {
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val bottomPad = when {
         fullScreen -> 0.dp
-        conn.currentTrack != null -> 118.dp + navBottom
+        conn.currentTrack != null -> 126.dp + navBottom
         else -> 58.dp + navBottom
     }
     Box(
@@ -128,6 +170,7 @@ fun CloudMusicRoot(vm: AppViewModel) {
                             // 从列表点歌是「想听」，停在唱片页
                             onOpenPlayer = {
                                 openAtLyrics = false
+                                playerOrigin = Screen.LIBRARY
                                 vm.screen = Screen.PLAYER
                             }
                         )
@@ -135,10 +178,7 @@ fun CloudMusicRoot(vm: AppViewModel) {
         Screen.PLAYER -> PlayerScreen(
                         vm = vm,
                         startOnLyrics = openAtLyrics,
-                        onBack = {
-                            openAtLyrics = false
-                            vm.screen = Screen.LIBRARY
-                        },
+                        onBack = backFromPlayer,
                         onOpenSettings = { vm.screen = Screen.SETTINGS }
                     )
 
@@ -150,7 +190,10 @@ fun CloudMusicRoot(vm: AppViewModel) {
             },
             onOpenPlaylistImport = { vm.screen = Screen.PLAYLIST_IMPORT },
             // 点「已导入」那条直接开播，播完还能看着播放器
-            onOpenPlayer = { vm.screen = Screen.PLAYER }
+            onOpenPlayer = {
+                playerOrigin = Screen.IMPORT
+                vm.screen = Screen.PLAYER
+            }
         )
 
         // 导入歌单：只拉清单存进「我的歌单」，一个字节的音频都不下
@@ -185,6 +228,8 @@ fun CloudMusicRoot(vm: AppViewModel) {
             },
             onOpenPlayer = {
                                 openAtLyrics = false
+                                // 从歌单进来的，返回要回歌单
+                                playerOrigin = Screen.PLAYLIST_DETAIL
                                 vm.screen = Screen.PLAYER
                             }
                         )
@@ -221,6 +266,8 @@ fun CloudMusicRoot(vm: AppViewModel) {
                         // 点迷你条 = 想看这句歌词，直接翻到歌词页
                         onOpenPlayer = {
                             openAtLyrics = true
+                            // 从哪儿点的迷你条，返回就回哪儿
+                            playerOrigin = vm.screen
                             vm.screen = Screen.PLAYER
                         },
                         onOpenQueue = { showMiniQueue = true }

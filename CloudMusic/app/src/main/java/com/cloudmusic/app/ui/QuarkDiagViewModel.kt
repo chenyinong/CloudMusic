@@ -415,7 +415,7 @@ class QuarkDiagViewModel(app: Application) : AndroidViewModel(app) {
         val kind = ProviderKind.of(prefs.importProvider)
         val provider = when (kind) {
             ProviderKind.WEBDAV ->
-                if (prefs.hasCredentials) DavProvider(appRef.repository.client()) else null
+                if (prefs.hasCredentials) DavProvider(appRef.repository.client(), prefs) else null
             ProviderKind.ONEDRIVE ->
                 if (prefs.oneDriveAccessToken.isNotBlank()) appRef.oneDriveProvider else null
         }

@@ -1,6 +1,7 @@
 package com.cloudmusic.app.ui
 
 import android.app.Application
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -12,6 +13,7 @@ import com.cloudmusic.app.data.CloudProvider
 import com.cloudmusic.app.data.DavProvider
 import com.cloudmusic.app.data.DeleteResult
 import com.cloudmusic.app.data.DownloadResult
+import com.cloudmusic.app.data.ImportTimings
 import com.cloudmusic.app.data.MusicHit
 import com.cloudmusic.app.data.MusicSearchRepository
 import com.cloudmusic.app.data.ProviderKind
@@ -35,6 +37,13 @@ data class ImportState(
      * 有这个就能直接播放 —— 不用再下一遍。点「已导入」那条时走它。
      */
     val track: Track? = null,
+    /**
+     * 这次导入各阶段耗时。
+     *
+     * 用来回答「到底哪一步慢」——解析直链、传输、校验、传网盘，
+     * 分开计时，慢的那段一眼就看出来。
+     */
+    val timings: ImportTimings? = null,
 )
 
 /**
@@ -83,6 +92,13 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
     var sourceFilter by mutableStateOf(SourceFilter.ALL)
     var searching by mutableStateOf(false)
     var states by mutableStateOf<Map<String, ImportState>>(emptyMap())
+
+    /**
+     * 最近一次导入的各阶段耗时，页面顶部显示一行。
+     *
+     * 「下载慢」到底慢在解析直链还是传输还是传网盘，看这行就知道。
+     */
+    var lastTimings by mutableStateOf<ImportTimings?>(null)
     var providerId by mutableStateOf(prefs.importProvider)
     var dir by mutableStateOf(prefs.importDir)
     var message by mutableStateOf("")
@@ -103,6 +119,7 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
     private var searchAgain = false
 
     companion object {
+        private const val TAG = "CloudMusicImport"
         /** 停手多久算「打完了」 */
         private const val AUTO_SEARCH_DELAY_MS = 600L
     }
@@ -142,7 +159,7 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun providerOf(kind: ProviderKind): CloudProvider? = when (kind) {
         ProviderKind.WEBDAV ->
-            if (prefs.hasCredentials) DavProvider(appRef.repository.client()) else null
+            if (prefs.hasCredentials) DavProvider(appRef.repository.client(), prefs) else null
         ProviderKind.ONEDRIVE ->
             if (prefs.oneDriveAccessToken.isNotBlank()) appRef.oneDriveProvider else null
     }
@@ -248,7 +265,7 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         val cur = states[hit.id]
         if (cur != null && cur.phase.isNotBlank() && !cur.done && !cur.failed) return
 
-        setPhase(hit.id, ImportState(phase = "准备中"))
+        setPhase(hit.id, ImportState(phase = "解析直链中"))
         viewModelScope.launch {
             val tmp = File(
                 appRef.cacheDir,
@@ -266,19 +283,22 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (dl is DownloadResult.Failed) {
                 tmp.delete()
+                lastTimings = dl.timings
                 setPhase(
                     hit.id,
                     ImportState(
                         phase = "失败",
                         failed = true,
                         message = listOfNotNull(dl.message, dl.note.takeIf { it.isNotBlank() })
-                            .joinToString(" · ")
+                            .joinToString(" · "),
+                        timings = dl.timings
                     )
                 )
                 return@launch
             }
             if (dl is DownloadResult.Partial) {
                 tmp.delete()
+                lastTimings = dl.timings
                 setPhase(
                     hit.id,
                     ImportState(
@@ -287,7 +307,8 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
                         message = listOfNotNull(
                             "公开渠道只能拿到 ${dl.gotSec} 秒试听（完整 ${dl.wantSec} 秒）",
                             dl.note.takeIf { it.isNotBlank() },
-                        ).joinToString(" · ")
+                        ).joinToString(" · "),
+                        timings = dl.timings
                     )
                 )
                 return@launch
@@ -297,6 +318,7 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
             // 存成 .mp3 播放器按扩展名解析会失败
             val fileName = buildFileName(hit, ok.ext)
             setPhase(hit.id, ImportState(phase = "上传中"))
+            val tUpload = System.nanoTime()
             val up = provider.upload(ok.file, dir, fileName) { sent, total ->
                 val phase = if (total > 0) {
                     "上传中 ${sent * 100 / total}%"
@@ -305,9 +327,16 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 setPhase(hit.id, ImportState(phase = phase))
             }
+            val uploadMs = (System.nanoTime() - tUpload) / 1_000_000
             ok.file.delete()
+            val timings = (ok.timings ?: ImportTimings()).copy(uploadMs = uploadMs)
+            lastTimings = timings
+            Log.i(TAG, "《${hit.title}》导入完成 $timings")
             if (up is UploadResult.Failed) {
-                setPhase(hit.id, ImportState(phase = "上传失败", failed = true, message = up.message))
+                setPhase(
+                    hit.id,
+                    ImportState(phase = "上传失败", failed = true, message = up.message, timings = timings)
+                )
                 return@launch
             }
             val entryId = (up as UploadResult.Ok).entryId
@@ -322,7 +351,8 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
                     phase = "已导入",
                     done = true,
                     message = "已存到 ${kind.shortLabel}",
-                    track = track
+                    track = track,
+                    timings = timings
                 )
             )
             // 顺手写进曲库索引，不等整盘扫描就能在「我的」里看到

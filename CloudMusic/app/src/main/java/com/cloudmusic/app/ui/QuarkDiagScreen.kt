@@ -1,5 +1,6 @@
 ﻿package com.cloudmusic.app.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -73,6 +74,8 @@ fun QuarkDiagScreen(
         ) {
             // 登录状态
             Card(
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp, focusedElevation = 0.dp, hoveredElevation = 0.dp, draggedElevation = 0.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 colors = CardDefaults.cardColors(
                     containerColor = if (loggedIn) {
                         MaterialTheme.colorScheme.primaryContainer
@@ -199,6 +202,8 @@ fun QuarkDiagScreen(
             if (vm.steps.isNotEmpty()) {
                 Text("过程", fontWeight = FontWeight.Bold)
                 Card(
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp, focusedElevation = 0.dp, hoveredElevation = 0.dp, draggedElevation = 0.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceVariant
                     )
@@ -227,6 +232,8 @@ fun QuarkDiagScreen(
                 if (vm.isArchive) {
                     Spacer(Modifier.height(6.dp))
                     Card(
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp, focusedElevation = 0.dp, hoveredElevation = 0.dp, draggedElevation = 0.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.secondaryContainer
                         )
@@ -291,6 +298,8 @@ fun QuarkDiagScreen(
                 vm.probe?.let { p ->
                     Spacer(Modifier.height(6.dp))
                     Card(
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp, pressedElevation = 0.dp, focusedElevation = 0.dp, hoveredElevation = 0.dp, draggedElevation = 0.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         colors = CardDefaults.cardColors(
                             containerColor = if (p.looksLikeAudio) {
                                 MaterialTheme.colorScheme.primaryContainer

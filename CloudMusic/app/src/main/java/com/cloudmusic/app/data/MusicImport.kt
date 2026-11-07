@@ -1,6 +1,7 @@
 package com.cloudmusic.app.data
 
 import android.media.MediaMetadataRetriever
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -101,7 +102,44 @@ data class SearchResult(
 )
 
 /** 下载结果。 */
+/**
+ * 一次导入各阶段的耗时（毫秒）。
+ *
+ * 用来定位「下载慢」到底慢在哪一段：
+ * - [resolveMs] 解析直链（分享详情 → 下载地址 → 探活，几个串行请求）
+ * - [downloadMs] 真正传音频字节
+ * - [verifyMs] 校验文件头和真实时长
+ * - [uploadMs] 传到网盘
+ */
+data class ImportTimings(
+    val resolveMs: Long = 0,
+    val downloadMs: Long = 0,
+    val verifyMs: Long = 0,
+    val uploadMs: Long = 0,
+) {
+    val totalMs: Long get() = resolveMs + downloadMs + verifyMs + uploadMs
+
+    /** 人话版：解析 2.3s · 下载 12.4s · 上传 8.1s · 共 23s */
+    fun summary(): String = buildString {
+        append("解析 ").append(fmtMs(resolveMs))
+        append(" · 下载 ").append(fmtMs(downloadMs))
+        if (verifyMs > 0) append(" · 校验 ").append(fmtMs(verifyMs))
+        if (uploadMs > 0) append(" · 上传 ").append(fmtMs(uploadMs))
+        append(" · 共 ").append(fmtMs(totalMs))
+    }
+}
+
+private fun fmtMs(ms: Long): String =
+    if (ms < 1000) "${ms}ms" else String.format("%.1fs", ms / 1000.0)
+
+/** 从某个 nanoTime 起点算到现在的毫秒数 */
+private fun elapsedMs(startNanos: Long): Long =
+    (System.nanoTime() - startNanos) / 1_000_000
+
 sealed class DownloadResult {
+    /** 各阶段耗时，失败时也有（能看到卡在哪一步挂的） */
+    abstract val timings: ImportTimings
+
     /** 拿到了完整音频 */
     data class Ok(
         val file: File,
@@ -109,6 +147,7 @@ sealed class DownloadResult {
         val durationSec: Int,
         /** 真实扩展名（不带点），落盘时要按它来 */
         val ext: String = "mp3",
+        override val timings: ImportTimings = ImportTimings(),
     ) : DownloadResult()
 
     /** 只拿到试听片段（平台版权限制） */
@@ -120,12 +159,14 @@ sealed class DownloadResult {
         val ext: String = "mp3",
         /** 补充说明（比如「网盘那条不通，已退回网易云」） */
         val note: String = "",
+        override val timings: ImportTimings = ImportTimings(),
     ) : DownloadResult()
 
     data class Failed(
         val message: String,
         /** 补充说明 */
         val note: String = "",
+        override val timings: ImportTimings = ImportTimings(),
     ) : DownloadResult()
 }
 
@@ -151,6 +192,7 @@ class MusicSearchRepository(
 ) {
 
     companion object {
+        private const val TAG = "CloudMusicImport"
         private const val HOST = "https://music.163.com"
         private const val UA =
             "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36"
@@ -366,6 +408,14 @@ class MusicSearchRepository(
             // 解析不出来就退回网易云 —— 哪怕只能拿到 30 秒试听，也比什么都没有强。
             // 但「纯网盘条目」（网易云压根没这首歌）没有退路，只能如实报错。
             var note = ""
+            // ── 阶段计时：解析直链 / 传输字节 / 校验 ──────────────
+            // 「下载慢」十有八九慢在第一段（几个串行的分享请求），
+            // 把三段分开计时，慢在哪一眼就看出来。
+            val tResolve = System.nanoTime()
+            var resolveMs = 0L
+            var downloadMs = 0L
+            var verifyMs = 0L
+
             // 网盘资源有两种来路：
             // - 这条本身就是网盘条目（liumingyeId 有值）；
             // - 这条是网易云的，但挂着同名的网盘资源（liumingyeIds）——
@@ -377,7 +427,11 @@ class MusicSearchRepository(
                     if (hit.liumingyeId != null) {
                         // 纯网盘条目：没有退路，只能如实报错
                         val why = quarkSource?.lastNote?.takeIf { it.isNotBlank() } ?: "拿不到直链"
-                        return@withContext DownloadResult.Failed("夸克网盘这条路走不通：$why")
+                        resolveMs = elapsedMs(tResolve)
+                        return@withContext DownloadResult.Failed(
+                            "夸克网盘这条路走不通：$why",
+                            timings = ImportTimings(resolveMs = resolveMs)
+                        )
                     }
                     // 网易云条目：网盘拿不到就退回网易云（可能只有试听，但总比没有强）
                     note = "网盘那份拿不到直链，已退回网易云"
@@ -403,6 +457,8 @@ class MusicSearchRepository(
                 effective.directUrl?.takeIf { it.isNotBlank() }
                     ?: (resolveAudioUrl(apiUrl) ?: apiUrl)
             }
+            // 直链拿到了，这一段（含分享详情/下载地址/探活/302 升级）到此为止
+            resolveMs = elapsedMs(tResolve)
 
             // 夸克那边对「完整请求」和「Range 请求」
             // 的处理不一样：完整请求有可能拿回来的不是音频字节（实测踩过），
@@ -428,6 +484,7 @@ class MusicSearchRepository(
                     .apply { if (a.range) header("Range", "bytes=0-") }
                     .build()
                 try {
+                    val tBody = System.nanoTime()
                     http.newCall(request).execute().use { resp ->
                         if (!resp.isSuccessful) {
                             lastMsg = when (resp.code) {
@@ -469,7 +526,12 @@ class MusicSearchRepository(
                                 }
                             }
                         }
+                        val tVerify = System.nanoTime()
                         val v = verify(effective, dest, resp)
+                        verifyMs += elapsedMs(tVerify)
+                        downloadMs += elapsedMs(tBody)
+                        val timings = ImportTimings(resolveMs, downloadMs, verifyMs)
+                        Log.i(TAG, "《${effective.title}》 $timings")
                         if (v is DownloadResult.Failed && v.message.contains("不是音频")) {
                             // 内容不对，换下一种请求姿势再试
                             lastMsg = v.message
@@ -477,16 +539,24 @@ class MusicSearchRepository(
                             return@use
                         }
                         if (v is DownloadResult.Partial && note.isNotBlank()) {
-                            return@withContext v.copy(note = note)
+                            return@withContext v.copy(note = note, timings = timings)
                         }
-                        return@withContext v
+                        return@withContext when (v) {
+                            is DownloadResult.Ok -> v.copy(timings = timings)
+                            is DownloadResult.Partial -> v.copy(timings = timings)
+                            is DownloadResult.Failed -> v.copy(timings = timings)
+                        }
                     }
                 } catch (e: Exception) {
                     lastMsg = e.message ?: "网络异常"
                 }
             }
             dest.delete()
-            DownloadResult.Failed(lastMsg, note)
+            DownloadResult.Failed(
+                lastMsg,
+                note,
+                timings = ImportTimings(resolveMs, downloadMs, verifyMs)
+            )
         }
 
     /**

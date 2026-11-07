@@ -56,6 +56,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var screen by mutableStateOf(Screen.LIBRARY)
     var query by mutableStateOf("")
 
+    /** 主题：是否跟随系统深色模式（关闭 = 固定浅色） */
+    private var _themeFollowSystem by mutableStateOf(prefs.themeFollowSystem)
+    var themeFollowSystem: Boolean
+        get() = _themeFollowSystem
+        set(value) {
+            _themeFollowSystem = value
+            prefs.themeFollowSystem = value
+        }
+
     /** 当前打开的歌单（歌单详情页用）。 */
     var playlistKey by mutableStateOf("")
 
@@ -683,7 +692,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** 当前网盘后端 */
     fun currentProvider(): CloudProvider = when (providerKind) {
         ProviderKind.ONEDRIVE -> appRef.oneDriveProvider
-        ProviderKind.WEBDAV -> DavProvider(repo.client())
+        ProviderKind.WEBDAV -> DavProvider(repo.client(), prefs)
     }
 
     /** 已经连上的网盘（可以同时有多个） */
@@ -695,7 +704,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun providerOf(kind: ProviderKind): CloudProvider? = when (kind) {
         ProviderKind.ONEDRIVE -> if (prefs.oneDriveConnected) appRef.oneDriveProvider else null
-        ProviderKind.WEBDAV -> if (prefs.hasCredentials) DavProvider(repo.client()) else null
+        ProviderKind.WEBDAV -> if (prefs.hasCredentials) DavProvider(repo.client(), prefs) else null
     }
 
 

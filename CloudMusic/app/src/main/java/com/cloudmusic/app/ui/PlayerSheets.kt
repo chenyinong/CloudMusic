@@ -2,6 +2,7 @@ package com.cloudmusic.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -17,11 +18,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GraphicEq
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -35,6 +37,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.material3.Surface
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -51,33 +56,61 @@ fun DiscPage(
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
-        // 小屏别让唱片顶出去 —— 按可用高度缩
+        // 小屏别让唱片顶出去 —— 按可用高度缩（卡片有 padding，多留点）
         val maxH = maxHeight
         val disc = minOf(
-            (maxH - 56.dp).coerceIn(160.dp, 300.dp),
-            (maxWidth - 40.dp).coerceIn(160.dp, 300.dp),
+            (maxH - 100.dp).coerceIn(160.dp, 300.dp),
+            (maxWidth - 84.dp).coerceIn(160.dp, 300.dp),
         )
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            VinylDisc(title = title, rotating = rotating, discSize = disc.value.toInt())
+            // QQ 音乐同款：白色方圆形大卡 + 大柔和投影（纯阴影，不要边框）
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 24.dp
+            ) {
+                Box {
+                    Box(Modifier.padding(22.dp)) {
+                        VinylDisc(title = title, rotating = rotating, discSize = disc.value.toInt())
+                    }
+                    // 卡片右下角的小绿标
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(14.dp)
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "Q",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
+            }
             Spacer(Modifier.height(14.dp))
             Row(
                 Modifier
                     .clip(RoundedCornerShape(16.dp))
-                    .background(Color.White.copy(alpha = 0.10f))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
                     .padding(horizontal = 12.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     Icons.Filled.GraphicEq,
                     contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.75f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(14.dp)
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
                     "网盘直连 · 原音质",
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color.White.copy(alpha = 0.8f)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -112,7 +145,7 @@ fun LyricsPage(
             state.loading -> Text(
                 "正在加载歌词…",
                 style = MaterialTheme.typography.bodySmall,
-                color = Color.White.copy(alpha = 0.5f)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             lyrics == null || lyrics.lines.isEmpty() -> Column(
@@ -121,17 +154,17 @@ fun LyricsPage(
                 Text(
                     state.error ?: "暂无歌词",
                     style = MaterialTheme.typography.titleSmall,
-                    color = Color.White.copy(alpha = 0.7f)
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "把同名 .lrc 放在歌曲同目录，或在设置里开启在线歌词",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color.White.copy(alpha = 0.4f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
                 TextButton(onClick = onManualSearch) {
-                    Text("手动搜索歌词", color = Color.White.copy(alpha = 0.8f))
+                    Text("手动搜索歌词", color = MaterialTheme.colorScheme.primary)
                 }
             }
 
@@ -146,7 +179,7 @@ fun LyricsPage(
                             .padding(vertical = 8.dp),
                         fontSize = if (active) 19.sp else 15.sp,
                         fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
-                        color = if (active) Color.White else Color.White.copy(alpha = 0.45f),
+                        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
                     )
                 }
@@ -155,7 +188,13 @@ fun LyricsPage(
     }
 }
 
-/** 歌曲信息弹窗。 */
+/**
+ * 歌曲信息弹窗。
+ *
+ * 不套 Material 的 AlertDialog 了：它只有纯色底、样式改不动。
+ * 自己用 Dialog 画，跟投屏面板同一套氛围渐变（跟着这首歌的封面色），
+ * 排版也按 QQ 风格：居中标题 + 淡分隔线 + 两列信息 + 底部小胶囊按钮。
+ */
 @Composable
 fun TrackInfoDialog(
     track: Track,
@@ -163,46 +202,87 @@ fun TrackInfoDialog(
     /** 从网盘删掉这首。传 null 就不显示这个按钮。 */
     onDelete: (() -> Unit)? = null,
 ) {
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        title = { Text("歌曲信息") },
-        text = {
-            Column {
-                InfoRow("歌名", track.title)
-                InfoRow("歌手", track.artist)
-                InfoRow("专辑", track.album)
-                InfoRow("文件名", track.fileName)
-                InfoRow("格式", track.mime)
-                InfoRow("大小", "${track.size / 1024 / 1024} MB")
-                InfoRow("时长", formatTime((track.durationSec * 1000).toLong()))
-                InfoRow("位置", track.folder)
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            Modifier
+                .padding(horizontal = 28.dp)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .songAmbientBackground(track.title)
+        ) {
+            Column(
+                Modifier.padding(horizontal = 20.dp, vertical = 20.dp)
+            ) {
+                Text(
+                    "歌曲信息",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+
+                Spacer(Modifier.height(14.dp))
+
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                Column(Modifier.fillMaxWidth()) {
+                    InfoRow("歌名", track.title)
+                    InfoRow("歌手", track.artist)
+                    InfoRow("专辑", track.album)
+                    InfoRow("文件名", track.fileName)
+                    InfoRow("格式", track.mime)
+                    InfoRow("大小", "${track.size / 1024 / 1024} MB")
+                    InfoRow("时长", formatTime((track.durationSec * 1000).toLong()))
+                    InfoRow("位置", track.folder)
+                }
+
                 if (onDelete != null) {
-                    Spacer(Modifier.height(10.dp))
-                    TextButton(onClick = onDelete) {
-                        Text("从网盘删除", color = MaterialTheme.colorScheme.error)
-                    }
+                    Spacer(Modifier.height(14.dp))
+                    SmallPill("从网盘删除", MaterialTheme.colorScheme.error, onDelete)
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                // 底部按钮：靠右，绿底小胶囊
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    SmallPill("知道了", MaterialTheme.colorScheme.primary, onDismiss)
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("知道了") }
         }
-    )
+    }
 }
 
 @Composable
 private fun InfoRow(label: String, value: String) {
-    Row(Modifier.padding(vertical = 3.dp)) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.Top
+    ) {
         Text(
             label,
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(56.dp)
+            modifier = Modifier.width(48.dp)
         )
+        Spacer(Modifier.width(12.dp))
         Text(
             value.ifBlank { "—" },
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -220,8 +300,8 @@ fun PlayQueueSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Color(0xFF2A2A2A),
-        contentColor = Color.White,
+        // M3 1.2 默认是 surfaceContainerLow（带主题色调 → 泛绿），换成纯白
+        containerColor = MaterialTheme.colorScheme.surface,
     ) {
         Column(
             Modifier
@@ -231,7 +311,7 @@ fun PlayQueueSheet(
             Text(
                 "播放列表 · ${queue.size} 首",
                 style = MaterialTheme.typography.titleSmall,
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
             )
             LazyColumn(
@@ -251,7 +331,7 @@ fun PlayQueueSheet(
                         Text(
                             t.title,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (active) Color(0xFFE64A4A) else Color.White,
+                            color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f)
@@ -259,7 +339,7 @@ fun PlayQueueSheet(
                         Text(
                             t.artist,
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color.White.copy(alpha = 0.45f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.width(96.dp)

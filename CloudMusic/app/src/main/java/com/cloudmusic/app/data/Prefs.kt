@@ -49,6 +49,8 @@ class Prefs(context: Context) {
         private const val KEY_DAV_CAPACITY = "dav_capacity_bytes"
         private const val KEY_DAV_USED = "dav_used_bytes"
         private const val KEY_IMPORTED = "imported_tracks"
+        private const val KEY_DAV_ROOT_WRITABLE = "dav_root_writable"
+        private const val KEY_THEME_FOLLOW = "theme_follow_system"
     }
 
     private val appContext = context.applicationContext
@@ -94,6 +96,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_ONLINE_LYRICS, true)
         set(v) = sp.edit().putBoolean(KEY_ONLINE_LYRICS, v).apply()
 
+    /** 是否跟随系统深色模式。默认 false（固定浅色）。 */
+    var themeFollowSystem: Boolean
+        get() = sp.getBoolean(KEY_THEME_FOLLOW, false)
+        set(v) = sp.edit().putBoolean(KEY_THEME_FOLLOW, v).apply()
+
     val credentials: DavCredentials
         get() = DavCredentials(serverUrl, account, appPassword)
 
@@ -123,6 +130,29 @@ class Prefs(context: Context) {
             serverUrl.toHttpUrl().host
         } catch (e: Exception) {
             ""
+        }
+
+    /**
+     * WebDAV 根目录能不能直接放文件。
+     *
+     * 坚果云这类网盘的根目录往往不让放文件（PUT 回 404），
+     * 得先 MKCOL 建一个子目录才行。
+     *
+     * 这个结论是「这个网盘是什么脾气」，跟哪首歌无关 ——
+     * 测一次就该记下来，别每首歌都去试一次。
+     * null = 还没试过。
+     */
+    var davRootWritable: Boolean?
+        get() = if (sp.contains(KEY_DAV_ROOT_WRITABLE)) {
+            sp.getBoolean(KEY_DAV_ROOT_WRITABLE, false)
+        } else {
+            null
+        }
+        set(v) {
+            sp.edit().apply {
+                if (v == null) remove(KEY_DAV_ROOT_WRITABLE)
+                else putBoolean(KEY_DAV_ROOT_WRITABLE, v)
+            }.apply()
         }
 
     // ---------------- OneDrive ----------------

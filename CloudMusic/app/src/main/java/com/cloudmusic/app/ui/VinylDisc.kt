@@ -66,19 +66,27 @@ fun VinylDisc(
         modifier.size(width = discSize.dp, height = discSize.dp),
         contentAlignment = Alignment.Center
     ) {
-        // 唱臂：右上角支点 → 斜压到唱片上
+        // 唱臂：右上角支点 → 斜压到唱片右下边缘（QQ 音乐银白唱臂）
         Canvas(Modifier.fillMaxSize()) {
-            val pivot = Offset(size.width * 0.88f, size.height * 0.07f)
-            val head = Offset(size.width * 0.585f, size.height * 0.40f)
+            val pivot = Offset(size.width * 0.90f, size.height * 0.04f)
+            val head = Offset(size.width * 0.76f, size.height * 0.70f)
             val minD = size.minDimension
-            // 支点座
-            drawCircle(Color(0xFF3A3A3A), radius = minD * 0.045f, center = pivot)
-            // 唱臂
+            // 支点座（银灰）
+            drawCircle(Color(0xFFB9BEC4), radius = minD * 0.045f, center = pivot)
+            drawCircle(Color(0xFFE9ECEF), radius = minD * 0.028f, center = pivot)
+            // 唱臂杆（银 + 一道深色中线，金属感）
             drawLine(
-                color = Color(0xFFD8D8D8),
+                color = Color(0xFFC7CCD1),
                 start = pivot,
                 end = head,
                 strokeWidth = minD * 0.018f,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = Color(0xFF9AA0A6),
+                start = pivot,
+                end = head,
+                strokeWidth = minD * 0.006f,
                 cap = StrokeCap.Round,
             )
             // 唱头（白色小方块）
@@ -113,15 +121,6 @@ fun VinylDisc(
                 size = (discSize * 0.80f * 0.62f).dp,
                 corner = (discSize * 0.80f * 0.31f).dp,
             )
-
-            // 中心孔
-            Canvas(Modifier.fillMaxSize()) {
-                drawCircle(
-                    color = Color(0xFF0E0E0E),
-                    radius = size.minDimension * 0.022f,
-                    center = Offset(size.width / 2f, size.height / 2f),
-                )
-            }
         }
     }
 }
@@ -131,7 +130,6 @@ fun VinylDisc(
  *
  * 关键在**沟槽是螺旋线，不是同心圆** —— 同心圆转起来眼睛看不出在动，
  * 螺旋线一转就明显了（真黑胶就是这么绕的）。
- * 另外加一个偏心的白色标记点，转起来更直观。
  */
 private fun makeDiscBitmap(size: Int): ImageBitmap {
     val bmp = android.graphics.Bitmap.createBitmap(
@@ -144,15 +142,15 @@ private fun makeDiscBitmap(size: Int): ImageBitmap {
     val cx = r
     val cy = r
 
-    // 黑胶底
+    // 唱片底：银白（QQ 那种银胶，不是纯黑）
     paint.style = android.graphics.Paint.Style.FILL
-    paint.color = 0xFF161616.toInt()
+    paint.color = 0xFFEDEDED.toInt()
     canvas.drawCircle(cx, cy, r, paint)
 
     // 螺旋沟槽
     paint.style = android.graphics.Paint.Style.STROKE
     paint.strokeWidth = size * 0.0035f
-    paint.color = 0xFF262626.toInt()
+    paint.color = 0xFFD7D7D7.toInt()
     val turns = 7f
     val steps = 420
     var prevX = 0f
@@ -168,20 +166,26 @@ private fun makeDiscBitmap(size: Int): ImageBitmap {
         prevY = y
     }
 
-    // 外圈亮边
+    // 外圈亮边：银灰一圈，像 QQ 音乐那张银胶
     paint.style = android.graphics.Paint.Style.STROKE
     paint.strokeWidth = size * 0.012f
-    paint.color = 0xFF303030.toInt()
+    paint.color = 0xFFC9CDD1.toInt()
     canvas.drawCircle(cx, cy, r - size * 0.006f, paint)
 
-    // 中心标签底色
+    // 中心标签底色（浅色，封面圆图会盖在上面）
     paint.style = android.graphics.Paint.Style.FILL
-    paint.color = 0xFF1E1E1E.toInt()
+    paint.color = 0xFFF4F4F4.toInt()
     canvas.drawCircle(cx, cy, r * 0.34f, paint)
 
-    // 偏心标记点 —— 一眼就能看出唱片在转
-    paint.color = 0xFFE8E8E8.toInt()
-    canvas.drawCircle(cx + r * 0.78f, cy - r * 0.16f, size * 0.020f, paint)
+    // 高光：左上一道柔光，银胶反射的质感
+    paint.style = android.graphics.Paint.Style.FILL
+    paint.shader = android.graphics.RadialGradient(
+        cx * 0.7f, cy * 0.6f, r * 1.1f,
+        0x66FFFFFF.toInt(), 0x00FFFFFF,
+        android.graphics.Shader.TileMode.CLAMP
+    )
+    canvas.drawCircle(cx, cy, r, paint)
+    paint.shader = null
 
     return bmp.asImageBitmap()
 }

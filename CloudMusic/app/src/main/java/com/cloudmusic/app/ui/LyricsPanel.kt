@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cloudmusic.app.data.Lyrics
@@ -114,7 +115,7 @@ fun LyricsPanel(
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 10.dp)
+                    contentPadding = PaddingValues(vertical = 70.dp)
                 ) {
                     itemsIndexed(lyrics.lines) { i, line ->
                         val active = i == index
@@ -142,17 +143,24 @@ fun LyricsPanel(
 
 @Composable
 private fun LyricRow(text: String, active: Boolean, onClick: () -> Unit) {
+    // 高亮切换用动画过渡，别硬跳
+    val target = if (active) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+    }
+    val color by animateColorAsState(target, label = "lyricColor")
     Text(
         text = text,
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 7.dp),
-        fontSize = if (active) 17.sp else 14.sp,
-        fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
-        color = if (active) MaterialTheme.colorScheme.primary
-        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-        textAlign = TextAlign.Center
+            .padding(horizontal = 16.dp, vertical = 11.dp),
+        fontSize = if (active) 18.sp else 15.sp,
+        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+        color = color,
+        textAlign = TextAlign.Center,
+        lineHeight = if (active) 25.sp else 21.sp
     )
 }
 
@@ -170,6 +178,7 @@ fun LyricsSearchDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
         title = { Text("手动搜索歌词") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

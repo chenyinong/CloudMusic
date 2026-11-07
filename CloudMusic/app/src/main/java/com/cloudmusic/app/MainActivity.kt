@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cloudmusic.app.ui.AppViewModel
@@ -24,8 +25,10 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         askNotificationPermission()
         setContent {
-            CloudMusicTheme {
-                val vm: AppViewModel = viewModel()
+            val vm: AppViewModel = viewModel()
+            // 开关关着就固定浅色；开着才随系统切深色
+            val dark = vm.themeFollowSystem && isSystemInDarkTheme()
+            CloudMusicTheme(dark = dark) {
                 CloudMusicRoot(vm)
             }
         }

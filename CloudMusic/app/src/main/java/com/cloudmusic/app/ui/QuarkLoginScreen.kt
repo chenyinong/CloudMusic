@@ -170,6 +170,7 @@ fun QuarkLoginScreen(
     if (showManual) {
         AlertDialog(
             onDismissRequest = { showManual = false },
+            containerColor = MaterialTheme.colorScheme.surface,
             title = { Text("手动贴 Cookie") },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {

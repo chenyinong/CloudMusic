@@ -1,5 +1,6 @@
 package com.cloudmusic.app.data
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
@@ -71,6 +72,8 @@ class DavClient(
 
     companion object {
         const val USER_AGENT = "CloudMusic/1.0 (Android)"
+
+        private const val TAG = "CloudMusicDav"
 
         /** 坚果云单次 PROPFIND 最多返回 750 条，超出部分靠分页拿 */
         private const val MAX_PAGES_PER_DIR = 40
@@ -229,6 +232,34 @@ class DavClient(
             val request = Request.Builder()
                 .url(urlFor(href))
                 .put(body)
+                .header("Authorization", creds.authorization)
+                .header("User-Agent", USER_AGENT)
+                .build()
+            val t0 = System.nanoTime()
+            try {
+                http.newCall(request).execute().use { resp ->
+                    val ms = (System.nanoTime() - t0) / 1_000_000
+                    Log.i(TAG, "PUT ${file.name} ${resp.code} ${ms}ms ${file.length()} 字节")
+                    resp.code == 201 || resp.code == 204 || resp.code == 200
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "PUT ${file.name} 失败：${e.javaClass.simpleName} ${e.message}")
+                false
+            }
+        }
+
+    /**
+     * 0 字节 PUT —— 用来快速探某个路径能不能写。
+     *
+     * 为什么值得单独写一个：有些网盘（坚果云就是）是**收完整 body 才回报错**的，
+     * 拿一首 8MB 的歌去试水，等于白白传了 8MB。
+     * 0 字节的 body 一发完就能拿到结论，几百毫秒搞定。
+     */
+    suspend fun putEmpty(href: String): Boolean =
+        withContext(Dispatchers.IO) {
+            val request = Request.Builder()
+                .url(urlFor(href))
+                .put(ByteArray(0).toRequestBody("application/octet-stream".toMediaType()))
                 .header("Authorization", creds.authorization)
                 .header("User-Agent", USER_AGENT)
                 .build()
