@@ -346,6 +346,27 @@ class DlnaClient(private val context: Context? = null) {
         )
     }
 
+    /** 设备当前的音量（0-100）。读不到返回 null。 */
+    fun getVolume(device: DlnaDevice): Int? {
+        if (device.renderingControlUrl.isEmpty()) return null
+        return try {
+            val resp = LanHttp.postSoap(
+                device.renderingControlUrl,
+                soapBody(
+                    SERVICE_RCS, "GetVolume",
+                    listOf("InstanceID" to "0", "Channel" to "Master")
+                ),
+                5000
+            )
+            if (resp.code != 200) return null
+            val m = Regex("<(?:[A-Za-z0-9]+:)?CurrentVolume>([^<]*)</")
+                .find(resp.text) ?: return null
+            m.groupValues[1].trim().toIntOrNull()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     /** 问设备现在什么状态（PLAYING / PAUSED_PLAYBACK / STOPPED） */
     fun transportState(device: DlnaDevice): String? {
         return try {

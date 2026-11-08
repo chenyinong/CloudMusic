@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -28,7 +29,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -165,6 +169,41 @@ fun DlnaSheet(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    Spacer(Modifier.height(10.dp))
+                    // 投屏音量：直接调设备喇叭，不走手机媒体音量。
+                    // 拖动只在本地跟手，松手才发一次 SetVolume。
+                    val vol = vm.castVolume ?: 0
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Slider(
+                            value = vol.toFloat(),
+                            onValueChange = { vm.setCastVolume(it.toInt(), commit = false) },
+                            onValueChangeFinished = {
+                                vm.setCastVolume(vm.castVolume ?: 0, commit = true)
+                            },
+                            valueRange = 0f..100f,
+                            // M3 默认 thumb 是一根竖条手柄，在这儿太突兀，去掉；
+                            // 轨道底色也去掉，只留已播的那截，更贴渐变背景
+                            thumb = {},
+                            colors = SliderDefaults.colors(
+                                inactiveTrackColor = Color.Transparent
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            "$vol",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.width(28.dp)
+                        )
+                    }
                 }
                 Spacer(Modifier.height(10.dp))
             }

@@ -87,6 +87,10 @@ class DlnaViewModel(app: Application) : AndroidViewModel(app) {
     var castArtist by mutableStateOf("")
         private set
 
+    /** 投屏时设备音量（0-100）。进入正在投屏状态后读一次设备，之后靠滑块拖动更新 */
+    var castVolume by mutableStateOf<Int?>(null)
+        private set
+
     private var server: DlnaServer? = null
     private var castPollJob: kotlinx.coroutines.Job? = null
 
@@ -167,6 +171,8 @@ class DlnaViewModel(app: Application) : AndroidViewModel(app) {
                 // 进度基准清零：这一首是从头开始的
                 castBasePos = 0L
                 castBaseAt = now
+                // 读一次设备当前音量，滑块好有个起点（读不到就用 50 猜一个）
+                castVolume = withContext(Dispatchers.IO) { client.getVolume(device) } ?: 50
                 startCastPolling()
             } else {
                 // 把设备到底说了什么带出来，不然没法排查
@@ -186,6 +192,7 @@ class DlnaViewModel(app: Application) : AndroidViewModel(app) {
             castPositionMs = 0L
             castTitle = ""
             castArtist = ""
+            castVolume = null
             castBasePos = 0L
             castBaseAt = System.currentTimeMillis()
             castPollJob?.cancel()
@@ -233,6 +240,26 @@ class DlnaViewModel(app: Application) : AndroidViewModel(app) {
             } else {
                 // 设备直接拒了 —— 换个带偏移的地址重新推，它只要从头播就行
                 pushWithOffset(device, positionMs)
+            }
+        }
+    }
+
+    /**
+     * 投屏时的音量 —— 转发给设备的 RenderingControl.SetVolume。
+     *
+     * `commit=false` 只在本地记一下（滑块拖动过程中跟手，别每动一格就发一次 SOAP），
+     * 松手时再带 `commit=true` 下发一次，避免拖动过程里刷爆设备。
+     */
+    fun setCastVolume(v: Int, commit: Boolean = true) {
+        val value = v.coerceIn(0, 100)
+        castVolume = value
+        if (!commit) return
+        val device = casting ?: return
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) { client.setVolume(device, value) }
+            if (!ok) {
+                error = "「${device.friendlyName}」音量调节失败：" +
+                    (client.lastError ?: "设备无响应")
             }
         }
     }
