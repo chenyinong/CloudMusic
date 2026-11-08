@@ -30,7 +30,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.runtime.LaunchedEffect
@@ -181,6 +180,8 @@ fun DlnaSheet(
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(Modifier.width(8.dp))
+                        // M3 默认 thumb 是竖条手柄、轨道末端还有个 stop indicator 圆点，
+                        // 在投屏面板里都太突兀，干脆自绘一条极简轨道
                         Slider(
                             value = vol.toFloat(),
                             onValueChange = { vm.setCastVolume(it.toInt(), commit = false) },
@@ -188,12 +189,30 @@ fun DlnaSheet(
                                 vm.setCastVolume(vm.castVolume ?: 0, commit = true)
                             },
                             valueRange = 0f..100f,
-                            // M3 默认 thumb 是一根竖条手柄，在这儿太突兀，去掉；
-                            // 轨道底色也去掉，只留已播的那截，更贴渐变背景
                             thumb = {},
-                            colors = SliderDefaults.colors(
-                                inactiveTrackColor = Color.Transparent
-                            ),
+                            track = { state ->
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .height(4.dp)
+                                        .clip(RoundedCornerShape(2.dp))
+                                        .background(
+                                            MaterialTheme.colorScheme.primary
+                                                .copy(alpha = 0.18f)
+                                        )
+                                ) {
+                                    Box(
+                                        Modifier
+                                            .fillMaxWidth(
+                                                (state.value / 100f).coerceIn(0f, 1f)
+                                            )
+                                            .align(Alignment.CenterStart)
+                                            .height(4.dp)
+                                            .clip(RoundedCornerShape(2.dp))
+                                            .background(MaterialTheme.colorScheme.primary)
+                                    )
+                                }
+                            },
                             modifier = Modifier.weight(1f)
                         )
                         Text(
