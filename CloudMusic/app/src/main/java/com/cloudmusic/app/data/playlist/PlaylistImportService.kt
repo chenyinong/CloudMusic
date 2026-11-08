@@ -6,6 +6,29 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.URLEncoder
 
+/** 在线解析没成功时，卡在哪一步（给用户看的分类，不是异常堆栈）。 */
+enum class OnlineFailReason {
+    /** 几个音源连同名都没搜到 */
+    NO_SAME_TITLE,
+
+    /** 搜到同名了，但歌手全不一致，放宽之后也没拿到直链 */
+    ARTIST_MISMATCH,
+
+    /** 同名同歌手有，但直链全探测失败 */
+    NO_DIRECT_URL,
+
+    /** 音源请求全挂了 */
+    SOURCE_ERROR,
+}
+
+/** 在线解析结论：拿到直链，或者一个能说清楚的失败原因。 */
+data class OnlineResolution(
+    val candidate: AudioCandidate? = null,
+    val reason: OnlineFailReason? = null,
+    /** 命中的是「同名异歌手」的放宽候选，日志和 UI 要能区分 */
+    val relaxed: Boolean = false,
+)
+
 /**
  * 歌单导入的编排：拉清单 → 比对曲库 → 找音源 → 给出每首歌的处理方案。
  *
@@ -34,6 +57,9 @@ class PlaylistImportService(
          */
         private const val MAX_RESOLVE_LIUMINGYE = 6
 
+        /** 放宽匹配每个源最多再试几个候选，别让一首歌发十几个请求。 */
+        private const val MAX_RELAXED_PER_SOURCE = 3
+
         /** 没有音源时给用户的兜底搜索链接（实测该站搜索参数是 q）。 */
         private const val FALLBACK_SEARCH = "https://so.liumingye.cn/search?q="
     }
@@ -60,15 +86,22 @@ class PlaylistImportService(
     /**
      * 歌单「在线播放」用：只解析出一条能直接拉的音频，不下载、不写曲库。
      *
-     * 夸克登录时把网盘源提到队首（优先完整版）；没登录就直接跳过它，
-     * 只走网易云 / 酷我，省掉一轮注定失败的解析。网盘源没命中也会继续
-     * 往下试公开源，尽量让用户听得到。匹配沿用 [findCandidates] 的严格
-     * 口径，避免「同名不同歌」播错。
+     * 夸克登录时把网盘源提到队首。匹配分两遍：
+     * 1. 先用「同名 + 同歌手」的严格口径把所有源试一遍；
+     * 2. 严格全灭才放宽到「歌名完全一致 + 时长不冲突 + 不是衍生版」。
+     *
+     * 为什么要放宽：儿歌 / 翻唱在歌单平台和音源站的歌手标注经常对不上。
+     * 实测「清早听到公鸡叫」歌单写「宝宝巴士」，三个音源 48 条候选里
+     * 歌名全对得上，歌手却是「彭野新儿歌 / 段丽阳 / 群星 …」，
+     * 严格口径把 48 条全刷掉，连取直链都没试就报「没找到可用音源」。
+     *
+     * 放宽**只用于在线试听**：导入入库仍走 [findCandidates] 的严格口径，
+     * 不会因为一次试听把别的演唱者的版本下进网盘。
      */
     suspend fun resolveForOnlinePlay(
         track: PlaylistTrack,
         quarkFirst: Boolean,
-    ): AudioCandidate? = withContext(Dispatchers.IO) {
+    ): OnlineResolution = withContext(Dispatchers.IO) {
         val quark = sources.filter { it.id == "liumingye" }
         val public = sources.filter { it.id != "liumingye" }
         val ordered = if (quarkFirst) quark + public else public
@@ -78,6 +111,10 @@ class PlaylistImportService(
                 "源=${ordered.joinToString(",") { it.id }} " +
                 "关键词=${SearchKeywords.forTrack(track.title, track.artist)}"
         )
+
+        val targetTag = TrackMatcher.variantTag(track.title, track.artist)
+        val strictBySource = LinkedHashMap<String, List<AudioCandidate>>()
+        val relaxedBySource = LinkedHashMap<String, List<AudioCandidate>>()
 
         for (source in ordered) {
             val raw = try {
@@ -92,7 +129,7 @@ class PlaylistImportService(
                             artist = track.artist,
                             album = track.album,
                             durationSec = track.durationSec,
-                            variantTag = TrackMatcher.variantTag(track.title, track.artist)
+                            variantTag = targetTag
                         )
                     )
                     else -> source.search(track.title, track.artist, track.durationSec)
@@ -103,35 +140,81 @@ class PlaylistImportService(
                 continue
             }
 
-            val matched = raw.filter {
+            val strict = raw.filter {
                 TrackMatcher.sameTitle(it.title, track.title) &&
                     TrackMatcher.artistHit(track.artist, it.artist)
-            }.take(if (source.id == "liumingye") MAX_RESOLVE_LIUMINGYE else MAX_RESOLVE_PER_SOURCE)
+            }.take(resolveCap(source))
+            // 只在「严格全灭」时兜底用；时长有一边未知就先放行，
+            // 下歌吧搜索结果不带时长（0），卡死它等于把这个源整个排除掉。
+            val relaxed = raw.filter {
+                TrackMatcher.sameTitle(it.title, track.title) &&
+                    !TrackMatcher.artistHit(track.artist, it.artist) &&
+                    durationUnknownOrClose(it.durationSec, track.durationSec) &&
+                    (it.variantTag == null || it.variantTag == targetTag)
+            }.take(MAX_RELAXED_PER_SOURCE)
+            strictBySource[source.id] = strict
+            relaxedBySource[source.id] = relaxed
             Log.d(
                 "CM/Resolve",
-                "[${source.id}] 搜到 ${raw.size} 条 / 同名同歌手 ${matched.size} 条；${source.lastNote}"
+                "[${source.id}] 搜到 ${raw.size} 条 / 同名同歌手 ${strict.size} 条 / " +
+                    "同名异歌手 ${relaxed.size} 条；${source.lastNote}"
             )
+        }
 
-            for (c in matched) {
-                val r = try {
-                    source.resolve(c)
-                } catch (e: Exception) {
-                    Log.w("CM/Resolve", "[${source.id}] ${c.songId} 取直链异常：${e.message}")
-                    null
+        // 两遍走完才放宽：宁可先让别的源用严格口径命中，也别一上来就播翻唱
+        for (pass in 0..1) {
+            val bySource = if (pass == 0) strictBySource else relaxedBySource
+            for (source in ordered) {
+                for (c in bySource[source.id].orEmpty()) {
+                    val hit = tryResolve(source, c) ?: continue
+                    if (pass == 1) {
+                        Log.d("CM/Resolve", "放宽匹配命中「${c.title}」-「${c.artist}」")
+                    }
+                    return@withContext OnlineResolution(hit, relaxed = pass == 1)
                 }
-                if (r == null) {
-                    Log.d("CM/Resolve", "[${source.id}] ${c.songId} 取不到直链：${source.lastNote}")
-                    continue
-                }
-                if (r.audioUrl.isNotBlank()) {
-                    Log.d("CM/Resolve", "[${source.id}] 命中 ${c.songId}：${source.lastNote}")
-                    return@withContext r
-                }
-                Log.d("CM/Resolve", "[${source.id}] ${c.songId} 直链为空：${source.lastNote}")
             }
         }
-        Log.w("CM/Resolve", "「${track.title}」所有源都没拿到直链")
-        null
+
+        val reason = when {
+            strictBySource.isEmpty() && relaxedBySource.isEmpty() -> OnlineFailReason.SOURCE_ERROR
+            strictBySource.values.any { it.isNotEmpty() } -> OnlineFailReason.NO_DIRECT_URL
+            relaxedBySource.values.any { it.isNotEmpty() } -> OnlineFailReason.ARTIST_MISMATCH
+            else -> OnlineFailReason.NO_SAME_TITLE
+        }
+        Log.w("CM/Resolve", "「${track.title}」所有源都没拿到直链：$reason")
+        OnlineResolution(reason = reason)
+    }
+
+    /** 探测一个候选的直链，顺手把每一步的失败原因落日志。 */
+    private suspend fun tryResolve(source: AudioSource, c: AudioCandidate): AudioCandidate? {
+        val r = try {
+            source.resolve(c)
+        } catch (e: Exception) {
+            Log.w("CM/Resolve", "[${source.id}] ${c.songId} 取直链异常：${e.message}")
+            return null
+        }
+        if (r == null) {
+            Log.d("CM/Resolve", "[${source.id}] ${c.songId} 取不到直链：${source.lastNote}")
+            return null
+        }
+        if (r.audioUrl.isBlank()) {
+            Log.d("CM/Resolve", "[${source.id}] ${c.songId} 直链为空：${source.lastNote}")
+            return null
+        }
+        Log.d("CM/Resolve", "[${source.id}] 命中 ${c.songId}：${source.lastNote}")
+        return r
+    }
+
+    private fun resolveCap(source: AudioSource): Int =
+        if (source.id == "liumingye") MAX_RESOLVE_LIUMINGYE else MAX_RESOLVE_PER_SOURCE
+
+    /**
+     * 时长能不能对上。有一边没报时长（下歌吧搜索结果就是 0）时不能
+     * 直接判不等 —— 得等 resolve 之后才知道真实时长，这里先放行。
+     */
+    private fun durationUnknownOrClose(candidateSec: Int, targetSec: Int): Boolean {
+        if (candidateSec <= 0 || targetSec <= 0) return true
+        return TrackMatcher.durationClose(candidateSec, targetSec, DURATION_TOLERANCE)
     }
 
     /** 网盘里是不是已经有这首了。 */

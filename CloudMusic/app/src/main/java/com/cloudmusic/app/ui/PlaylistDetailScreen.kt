@@ -534,15 +534,42 @@ private fun DetailTrackRow(
             )
             // 在线播放的状态/失败原因就显示在这首歌下面，跟着列表一起滚
             if (hint != null) {
-                Text(
-                    hint.text,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (hint.error) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(top = 2.dp)
-                )
+                ) {
+                    Text(
+                        hint.text,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (hint.error) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    // 失败时给一条能自己找的出路，别只丢一句「没找到」
+                    if (hint.error) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .padding(start = 6.dp)
+                                .clickable(onClick = onFallback)
+                        ) {
+                            Icon(
+                                Icons.Filled.OpenInBrowser,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(Modifier.width(2.dp))
+                            Text(
+                                "去别处找",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
             }
             if (phase != null && phase.failed && phase.message.isNotBlank()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

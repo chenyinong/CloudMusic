@@ -12,6 +12,8 @@ import com.cloudmusic.app.data.DavProvider
 import com.cloudmusic.app.data.ProviderKind
 import com.cloudmusic.app.data.Track
 import com.cloudmusic.app.data.playlist.AudioCandidate
+import com.cloudmusic.app.data.playlist.OnlineFailReason
+import com.cloudmusic.app.data.playlist.OnlineResolution
 import com.cloudmusic.app.data.playlist.PlaylistTrackImporter
 import com.cloudmusic.app.data.playlist.SavedPlaylist
 import com.cloudmusic.app.data.playlist.SavedTrack
@@ -338,6 +340,18 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { startMixedPlayback(queue, 0) }
     }
 
+    /** 在线解析失败的文案：说清楚卡在哪一步，别再甩给「登录夸克」。 */
+    private fun onlineFailText(reason: OnlineFailReason): String = when (reason) {
+        OnlineFailReason.ARTIST_MISMATCH ->
+            "音源里有同名版本，但歌手标的不一样，没能直接播"
+        OnlineFailReason.NO_SAME_TITLE ->
+            "几个音源都没搜到同名歌曲"
+        OnlineFailReason.NO_DIRECT_URL ->
+            "找到同名同歌手，但拿不到可播的直链"
+        OnlineFailReason.SOURCE_ERROR ->
+            "音源请求都失败了，检查一下网络"
+    }
+
     /**
      * 歌单「在线混播」：已下载的直接播，没下载的以占位进队列，
      * 轮到它之前再在线解析直链、原地替掉（resolveAround），顺序不乱、播放不中断。
@@ -362,20 +376,21 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
         }
         // 第一首若是占位（没下载），先解析出直链再建队列；
         // 解析不出来的占位歌根本不会进媒体队列，播放器也不会去拉空 URL。
-        var firstFailed = false
+        var startFailure: OnlineFailReason? = null
         queue.getOrNull(startIndex)?.takeIf { it.url.isBlank() }?.let { first ->
             tracks.firstOrNull { it.key == first.key }?.let { saved ->
-                val c = try {
+                val result = try {
                     appRef.playlistImport.resolveForOnlinePlay(saved.toPlaylistTrack(), appRef.quarkClient.loggedIn)
                 } catch (e: Exception) {
-                    null
+                    OnlineResolution(reason = OnlineFailReason.SOURCE_ERROR)
                 }
                 // 不论成败都记下来，别让预解析再花几秒重试同一首
                 resolvedKeys.add(first.key)
+                val c = result.candidate
                 if (c != null && c.audioUrl.isNotBlank()) {
                     queue[startIndex] = buildOnlineTrack(saved.key, c)
                 } else {
-                    firstFailed = true
+                    startFailure = result.reason ?: OnlineFailReason.NO_SAME_TITLE
                 }
             }
         }
@@ -385,8 +400,9 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
         onlineLoadingKey = null
         // 只有解析失败要挂提示（留在那一行）；「在线播放中」由 hintFor
         // 按当前曲目推导，播到下一首会自动挪过去
-        if (hintKey != null && firstFailed) {
-            onlineHint = OnlineHint(hintKey, "没找到可用音源（登录夸克还能再找一次）", error = true)
+        val failure = startFailure
+        if (hintKey != null && failure != null) {
+            onlineHint = OnlineHint(hintKey, onlineFailText(failure), error = true)
         }
     }
 
@@ -414,14 +430,15 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
             val key = queueOrder[i]
             if (key in resolvedKeys) continue
             val saved = pendingByKey[key] ?: continue
-            val c = try {
+            val result = try {
                 appRef.playlistImport.resolveForOnlinePlay(saved.toPlaylistTrack(), quarkFirst)
             } catch (e: Exception) {
-                null
+                OnlineResolution()
             }
             // 解析不到也标记为已处理，避免反复重试拖死循环
             resolvedKeys.add(key)
-            if (c == null || c.audioUrl.isBlank()) continue
+            val c = result.candidate ?: continue
+            if (c.audioUrl.isBlank()) continue
             player.replaceMediaItem(i, buildOnlineTrack(key, c))
         }
         // 全部解析完就收摊，别一直挂着
