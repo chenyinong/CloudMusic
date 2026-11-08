@@ -4,6 +4,7 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import com.cloudmusic.app.data.Prefs
 import com.cloudmusic.app.data.StreamAuth
+import com.cloudmusic.app.data.quark.QuarkClient
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -25,8 +26,23 @@ class StreamDataSourceFactory(private val prefs: Prefs) : DataSource.Factory {
             .addInterceptor { chain ->
                 val request = chain.request()
                 val host = request.url.host
+
+                // 夸克直链是会话绑定的：必须带登录 Cookie + Referer + PC UA，
+                // 否则 CDN 直接 412。曲库里的歌都来自自己的网盘，只有「搜歌页试听」
+                // 会请求夸克域名，所以按 host 判断就够，不需要额外开关。
+                // OkHttp 跟随 302 时只自动剥离 Authorization，其它普通头会保留，
+                // 所以重定向到 CDN 之后这几个头依然在。
+                val quark = host.contains("quark.cn", ignoreCase = true) &&
+                    prefs.quarkCookie.isNotBlank()
                 val builder = request.newBuilder()
-                    .header("User-Agent", "CloudMusic/1.0 (Android)")
+                    .header(
+                        "User-Agent",
+                        if (quark) QuarkClient.UA_PC else "CloudMusic/1.0 (Android)"
+                    )
+                if (quark) {
+                    builder.header("Cookie", prefs.quarkCookie.trim())
+                    builder.header("Referer", "https://pan.quark.cn/")
+                }
 
                 val authHeader = StreamAuth.header(prefs, host)
                 if (authHeader != null) builder.header("Authorization", authHeader)

@@ -451,6 +451,38 @@ class MusicSearchRepository(
 
     /** 下载到本地文件。 */
     /**
+     * 搜歌页「试听」用：只把结果解析成一条能直接拉的音频直链，不下载、不写曲库。
+     *
+     * 优先夸克（完整版，几步网络请求），拿不到就退回现成直链或网易云
+     * outer/url（多数只有 30 秒片段）。返回的 hit 里 directUrl / extraHeaders
+     * 已填好；播放层按 host 自动给夸克请求带 Cookie（见 StreamDataSourceFactory）。
+     */
+    suspend fun resolveForPreview(hit: MusicHit): MusicHit? =
+        withContext(Dispatchers.IO) {
+            val cloudId = hit.liumingyeId ?: hit.liumingyeIds.firstOrNull()
+            if (cloudId != null) {
+                val q = try {
+                    resolveQuark(hit.copy(liumingyeId = cloudId))
+                } catch (e: Exception) {
+                    null
+                }
+                if (q?.directUrl?.isNotBlank() == true) return@withContext q
+            }
+            if (hit.directUrl?.isNotBlank() == true) return@withContext hit
+            // 纯网易云条目：拼 outer/url，跟 download() 走同一套重定向升级
+            if (hit.id.isNotBlank() && hit.id.all { it.isDigit() }) {
+                val api = "$HOST/song/media/outer/url?id=${hit.id}.mp3"
+                val real = try {
+                    resolveAudioUrl(api) ?: api
+                } catch (e: Exception) {
+                    api
+                }
+                return@withContext hit.copy(directUrl = real, ext = "mp3")
+            }
+            null
+        }
+
+    /**
      * 下载到本地文件。
      *
      * @param onProgress 下载进度回调（已下字节 / 总字节）

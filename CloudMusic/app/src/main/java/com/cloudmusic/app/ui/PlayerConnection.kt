@@ -92,6 +92,7 @@ class PlayerConnection(private val context: Context) {
 
     private var pendingTracks: List<Track>? = null
     private var pendingIndex: Int = 0
+    private var pendingPositionMs: Long = 0L
 
     fun connect() {
         if (controller != null) return
@@ -103,7 +104,7 @@ class PlayerConnection(private val context: Context) {
                 c.addListener(listener)
                 controller = c
                 pendingTracks?.let {
-                    play(it, pendingIndex)
+                    play(it, pendingIndex, pendingPositionMs)
                     pendingTracks = null
                 }
             } catch (e: Exception) {
@@ -112,19 +113,24 @@ class PlayerConnection(private val context: Context) {
         }, ContextCompat.getMainExecutor(context))
     }
 
-    fun play(tracks: List<Track>, startIndex: Int) {
+    /**
+     * @param startPositionMs 起播位置，默认从头。
+     *        试听结束要恢复原来的播放进度，靠这个而不是播完再 seekTo。
+     */
+    fun play(tracks: List<Track>, startIndex: Int, startPositionMs: Long = 0L) {
         if (tracks.isEmpty()) return
         val c = controller
         if (c == null) {
             pendingTracks = tracks
             pendingIndex = startIndex
+            pendingPositionMs = startPositionMs
             connect()
             return
         }
         playlist = tracks
         queue = tracks
         val items = tracks.map { toMediaItem(it) }
-        c.setMediaItems(items, startIndex.coerceIn(0, items.size - 1), 0L)
+        c.setMediaItems(items, startIndex.coerceIn(0, items.size - 1), startPositionMs)
         c.prepare()
         c.play()
         currentTitle = tracks.getOrNull(startIndex)?.title.orEmpty()

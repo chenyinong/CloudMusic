@@ -153,6 +153,23 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
     var deletingIds by mutableStateOf(setOf<String>())
         private set
 
+    /** 正在试听的搜索结果 id；null = 没在试听。 */
+    var previewId by mutableStateOf<String?>(null)
+        private set
+
+    /** 正在解析直链的 id（夸克那几步网络请求要几秒，按钮转圈）。 */
+    var previewLoadingId by mutableStateOf<String?>(null)
+        private set
+
+    /** 播放器报错（试听遇到 412 / 直链失效会落到这里）。 */
+    val playbackError: String? get() = appRef.player.errorText
+
+    /** 试听前记下的现场，停止时原样还回去。 */
+    private var resumeQueue: List<Track> = emptyList()
+    private var resumeIndex = 0
+    private var resumePosMs = 0L
+    private var previewJob: Job? = null
+
     /** 自动搜索的计时任务（打字时反复重置） */
     private var autoSearchJob: Job? = null
 
@@ -485,6 +502,85 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         val t = states[hit.id]?.track ?: return false
         appRef.player.play(listOf(t), 0)
         return true
+    }
+
+    /**
+     * 搜歌页「试听」：不下载、不写曲库，直接把网盘直链丢给播放器。
+     *
+     * 听对了再点导入，不用先占自己网盘的空间。夸克直链是会话绑定的，
+     * 播放层按 host 自动补 Cookie/Referer/PC UA（StreamDataSourceFactory）。
+     */
+    fun preview(hit: MusicHit) {
+        // 再点一次 = 停止并恢复原来的播放
+        if (previewId == hit.id) {
+            stopPreview()
+            return
+        }
+        // 换一首试听时不必把上次的现场恢复一遍，直接接着替换队列
+        stopPreview(restore = false)
+        appRef.player.clearError()
+        previewLoadingId = hit.id
+        previewJob?.cancel()
+        previewJob = viewModelScope.launch {
+            val resolved = try {
+                appRef.musicSearch.resolveForPreview(hit)
+            } catch (e: Exception) {
+                null
+            }
+            previewLoadingId = null
+            val url = resolved?.directUrl?.takeIf { it.isNotBlank() }
+            if (resolved == null || url == null) {
+                message = "试听失败：拿不到音频直链（夸克要先登录，分享也可能已失效）"
+                return@launch
+            }
+            val track = Track(
+                key = "preview:${hit.id}",
+                id = hit.id,
+                url = url,
+                fileName = "${hit.title}.${resolved.ext.ifBlank { "mp3" }}",
+                title = hit.title,
+                artist = hit.artist,
+                album = hit.album,
+                folder = "",
+                size = 0L,
+                mime = "audio/*",
+                durationSec = resolved.durationSec.toDouble(),
+                provider = "preview",
+            )
+            val before = appRef.player.queue.toList()
+            resumeQueue = before
+            resumeIndex = before.indexOfFirst {
+                it.key == appRef.player.currentTrack?.key
+            }.coerceAtLeast(0)
+            resumePosMs = appRef.player.positionMs
+            // 只放这一首：临时队列，不进曲库、不留在歌单
+            appRef.player.play(listOf(track), 0)
+            previewId = hit.id
+            message = if (resolved.extraHeaders.containsKey("Cookie")) {
+                "正在试听《${hit.title}》· 夸克完整版，再点一次停止"
+            } else {
+                "正在试听《${hit.title}》（可能是片段），再点一次停止"
+            }
+        }
+    }
+
+    /** 停止试听，把试听前的队列和进度还回去。 */
+    fun stopPreview(restore: Boolean = true) {
+        previewJob?.cancel()
+        previewJob = null
+        previewLoadingId = null
+        previewId = null
+        if (restore && resumeQueue.isNotEmpty()) {
+            appRef.player.play(resumeQueue, resumeIndex, resumePosMs)
+            message = "已停止试听，恢复原来的播放"
+        }
+        resumeQueue = emptyList()
+        resumePosMs = 0L
+    }
+
+    override fun onCleared() {
+        stopPreview()
+        super.onCleared()
     }
 
     /**

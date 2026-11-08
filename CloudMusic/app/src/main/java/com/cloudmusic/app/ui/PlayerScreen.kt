@@ -64,6 +64,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -324,20 +325,21 @@ fun PlayerScreen(
             }
         }
 
-        // ── 歌名 + 心形（QQ 音乐：卡片下方，歌名左、心形右）─────
+        // ── 歌名 + 心形：标题放宽到两行，别再一行硬截断成「xxx 2...」─────
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 title.ifBlank { "未在播放" },
-                style = MaterialTheme.typography.headlineSmall,
+                style = MaterialTheme.typography.titleLarge.copy(lineHeight = 28.sp),
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
             )
+            Spacer(Modifier.width(14.dp))
             Icon(
                 Icons.Filled.FavoriteBorder,
                 contentDescription = "喜欢",
@@ -345,7 +347,7 @@ fun PlayerScreen(
                 modifier = Modifier.size(24.dp)
             )
         }
-        // 歌手 + 灰色胶囊标签（+ / 音质）
+        // 歌手 + 音质标签：原来那个裸「+」字符没有交互，只会让这行变吵，去掉
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -358,18 +360,8 @@ fun PlayerScreen(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false)
             )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                "+",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .padding(horizontal = 7.dp, vertical = 2.dp)
-            )
             formatBadge(track?.fileName)?.let { badge ->
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(8.dp))
                 Text(
                     badge,
                     style = MaterialTheme.typography.labelSmall,
@@ -381,13 +373,13 @@ fun PlayerScreen(
                 )
             }
         }
-        // 下面一行灰字：专辑名（QQ 是「改编词：xxx」那种淡注）
+        // 专辑名更淡、贴紧歌手，两行合成一个信息块
         track?.album?.takeIf { it.isNotBlank() }?.let {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(4.dp))
             Text(
                 it,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.fillMaxWidth()

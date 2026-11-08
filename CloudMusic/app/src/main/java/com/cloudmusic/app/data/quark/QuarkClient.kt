@@ -37,7 +37,7 @@ class QuarkClient(
 
     companion object {
         const val HOST = "https://drive-pc.quark.cn"
-        private const val UA_PC =
+        const val UA_PC =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36"
 
         /** 手机端 UA。有些 CDN 对手机 UA 的处理跟 PC 不一样。 */
