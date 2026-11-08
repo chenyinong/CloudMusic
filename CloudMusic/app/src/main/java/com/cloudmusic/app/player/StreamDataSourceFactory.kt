@@ -29,7 +29,7 @@ class StreamDataSourceFactory(private val prefs: Prefs) : DataSource.Factory {
 
                 // 夸克直链是会话绑定的：必须带登录 Cookie + Referer + PC UA，
                 // 否则 CDN 直接 412。曲库里的歌都来自自己的网盘，只有「搜歌页试听」
-                // 会请求夸克域名，所以按 host 判断就够，不需要额外开关。
+                // 和「歌单在线播放」会请求夸克域名，所以按 host 判断就够。
                 // OkHttp 跟随 302 时只自动剥离 Authorization，其它普通头会保留，
                 // 所以重定向到 CDN 之后这几个头依然在。
                 val quark = host.contains("quark.cn", ignoreCase = true) &&

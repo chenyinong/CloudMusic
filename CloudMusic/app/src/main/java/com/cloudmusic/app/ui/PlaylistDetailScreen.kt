@@ -27,6 +27,8 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -42,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -80,6 +83,11 @@ fun PlaylistDetailScreen(
     val context = LocalContext.current
 
     LaunchedEffect(playlistKey) { vm.load(playlistKey) }
+
+    // 离开歌单详情页就收掉在线播放，别把临时单曲队列带到别的页面
+    DisposableEffect(playlistKey) {
+        onDispose { vm.stopOnline() }
+    }
 
     var showTarget by remember { mutableStateOf(false) }
     var showDelete by remember { mutableStateOf(false) }
@@ -209,6 +217,9 @@ fun PlaylistDetailScreen(
                 }
             }
 
+            // 在线播放的提示（成功 / 没找到音源 / 拉流报错）现在挂在对应歌曲行里，
+            // 不再放列表顶部 —— 往下滑几屏就看不见了。
+
             if (list.isEmpty()) {
                 item(key = "empty") {
                     Column(
@@ -236,6 +247,10 @@ fun PlaylistDetailScreen(
                         // 注意别写成 `a == b`：两边都是 null 时会误判成「正在播放」
                         playing = vm.libraryTracks[t.key]?.key
                             ?.let { vm.player.currentTrack?.key == it } == true,
+                        onlinePlaying = vm.onlineKey == t.key,
+                        onlineLoading = vm.onlineLoadingKey == t.key,
+                        hint = vm.hintFor(t.key),
+                        onOnlinePlay = { vm.playOnline(t) },
                         onImport = { vm.importTrack(t) },
                         onPlay = {
                             vm.playTrack(t)
@@ -435,7 +450,12 @@ private fun DetailTrackRow(
     playable: Boolean,
     /** 正在放这首 */
     playing: Boolean,
+    onlinePlaying: Boolean,
+    onlineLoading: Boolean,
+    /** 在线播放的行内提示：挂在这一行，跟着列表滚 */
+    hint: OnlineHint?,
     onImport: () -> Unit,
+    onOnlinePlay: () -> Unit,
     onPlay: () -> Unit,
     onFallback: () -> Unit,
 ) {
@@ -446,29 +466,51 @@ private fun DetailTrackRow(
     Row(
         Modifier
             .fillMaxWidth()
-            // 整行都可点：已经进网盘的就直接播，还没导的就去找音源
+            // 整行默认就是「播这首」：进网盘的播网盘文件，没导的走在线播放。
+            // 导入只走右边的云图标，别让点一下歌名就悄悄开始下载上传。
             .clickable(enabled = !busy) {
                 when {
                     playable -> onPlay()
-                    !done -> onImport()
+                    // 已经在在线播这首了，点行不重复也不误停（停止走右边图标）
+                    !onlinePlaying -> onOnlinePlay()
                 }
             }
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            "$index",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(28.dp)
-        )
+        // B 方案：正在播（含在线播）时序号位换成均衡器条，
+        // 播放状态放在这里，就不用在右侧再塞一个播放按钮了。
+        Box(Modifier.width(28.dp), contentAlignment = Alignment.Center) {
+            if (playing || onlinePlaying) {
+                Row(
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    listOf(6.dp, 12.dp, 8.dp).forEach { h ->
+                        Box(
+                            Modifier
+                                .width(2.5.dp)
+                                .height(h)
+                                .clip(RoundedCornerShape(1.dp))
+                                .background(MaterialTheme.colorScheme.primary)
+                        )
+                    }
+                }
+            } else {
+                Text(
+                    "$index",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
         Column(Modifier.weight(1f)) {
             Text(
                 track.title,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                color = if (playing) {
+                color = if (playing || onlinePlaying) {
                     MaterialTheme.colorScheme.primary
                 } else if (done) {
                     MaterialTheme.colorScheme.onSurfaceVariant
@@ -485,6 +527,18 @@ private fun DetailTrackRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            // 在线播放的状态/失败原因就显示在这首歌下面，跟着列表一起滚
+            if (hint != null) {
+                Text(
+                    hint.text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (hint.error) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
             if (phase != null && phase.failed && phase.message.isNotBlank()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -506,50 +560,57 @@ private fun DetailTrackRow(
             }
         }
         Spacer(Modifier.width(8.dp))
+        // B 方案：一行最多一个淡圆图标。整行点击已经是「播放」，
+        // 所以播放不需要按钮；导入是低频次操作，降成一个 30dp 线性图标。
         when {
             busy -> Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(6.dp))
                 Text(phase?.text.orEmpty(), style = MaterialTheme.typography.labelMedium)
             }
-            // 已经进网盘了，能播就给「播放」
-            // 不用 Material 的 Button —— 默认 40dp 高、带三角图标，太占地方。
-            // 自己画个小胶囊，去掉箭头只留文字。
-            playable -> Box(
+            onlineLoading -> Box(
                 Modifier
-                    .height(30.dp)
-                    .clip(RoundedCornerShape(15.dp))
-                    .background(MaterialTheme.colorScheme.primary)
-                    .clickable(onClick = onPlay)
-                    .padding(horizontal = 14.dp),
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    if (playing) "播放中" else "播放",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
+                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
             }
-            done -> Text(
-                phase?.text?.takeIf { it.isNotBlank() } ?: "已在网盘",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary
-            )
-            else -> Box(
+            onlinePlaying -> Box(
                 Modifier
-                    .height(30.dp)
-                    .clip(RoundedCornerShape(15.dp))
-                    .background(MaterialTheme.colorScheme.primary)
-                    .clickable(onClick = onImport)
-                    .padding(horizontal = 14.dp),
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .clickable(onClick = onOnlinePlay),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    "导入",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onPrimary
+                // 实心圆角方块：标准的停止符号，一眼能认。
+                // 之前用空心描边方块跟线性云图标配套，结果被看成了复选框。
+                Icon(
+                    Icons.Filled.Stop,
+                    contentDescription = "停止在线播放",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(17.dp)
                 )
             }
+            // 未导入（或导入失败可重试）：云 + 上箭头 = 传到自己的网盘
+            !done -> Box(
+                Modifier
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .clickable(onClick = onImport),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Outlined.CloudUpload,
+                    contentDescription = "导入到网盘",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(17.dp)
+                )
+            }
+            // 已导入的行右侧留空：点行即播放，不需要任何按钮
         }
     }
 }

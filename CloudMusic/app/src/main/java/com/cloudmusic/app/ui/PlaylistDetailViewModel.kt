@@ -20,6 +20,7 @@ import com.cloudmusic.app.data.playlist.TrackPlan
 import com.cloudmusic.app.data.playlist.TrackState
 import com.cloudmusic.app.data.playlist.TrackStatus
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -37,6 +38,18 @@ data class PendingImport(
     val plan: TrackPlan,
     /** 为什么要确认 */
     val reason: String,
+)
+
+/**
+ * 在线播放的提示，按条目挂。
+ *
+ * 之前统一放在列表顶部，用户往下滑几屏就完全看不见了 ——
+ * 提示必须跟它对应的那首歌待在一起。
+ */
+data class OnlineHint(
+    val key: String,
+    val text: String,
+    val error: Boolean = false,
 )
 
 /**
@@ -101,6 +114,45 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
     /** 网盘源（下歌吧）要登录夸克才能用，没登录就等于只有两个公开源。 */
     var cloudReady by mutableStateOf(false)
         private set
+
+    /** 正在在线播放的歌单条目 key；null = 没在播。 */
+    var onlineKey by mutableStateOf<String?>(null)
+        private set
+
+    /** 正在解析直链的 key（夸克那几步请求要几秒，按钮转圈）。 */
+    var onlineLoadingKey by mutableStateOf<String?>(null)
+        private set
+
+    /** 播放器报错（夸克 412 / 直链失效会落到这里）。 */
+    val playbackError: String? get() = appRef.player.errorText
+
+    /** 在线播放的行内提示：成功 / 解析失败，只挂在对应的那首歌下面。 */
+    var onlineHint by mutableStateOf<OnlineHint?>(null)
+        private set
+
+    /**
+     * 给列表行取提示。
+     *
+     * 拉流报错是异步来的（夸克 Cookie 过期会 412），这里把它和本行的
+     * 在线状态合并成一条，不用在列表顶部再单独挂一行。
+     */
+    fun hintFor(key: String): OnlineHint? {
+        val err = playbackError
+        if (onlineKey == key && err != null) {
+            return OnlineHint(
+                key,
+                "在线播放失败：$err · 夸克 Cookie 可能已过期，去设置重新登录再试",
+                error = true
+            )
+        }
+        return onlineHint?.takeIf { it.key == key }
+    }
+
+    /** 在线播放前的现场，停止时原样还回去。 */
+    private var resumeQueue: List<Track> = emptyList()
+    private var resumeIndex = 0
+    private var resumePosMs = 0L
+    private var onlineJob: Job? = null
 
     // ------------------------------------------------------------ 载入
 
@@ -232,6 +284,97 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
         val queue = playableTracks
         if (queue.isEmpty()) return
         player.play(queue, 0)
+    }
+
+    /**
+     * 在线播放：不用先导入网盘也能听。
+     *
+     * 夸克登录 → 网盘源排最前拿完整版；没登录 → 只走网易云 / 酷我。
+     * 直链是即点即解析的（带 auth_key、有时效），不缓存不写库。
+     */
+    fun playOnline(t: SavedTrack) {
+        // 再点一次 = 停止并恢复原来的播放
+        if (onlineKey == t.key) {
+            stopOnline()
+            return
+        }
+        // 换一首时不必把上次的现场恢复一遍，直接接着替换队列
+        stopOnline(restore = false)
+        // 每次点都读最新登录态：用户可能刚在设置里登录夸克又返回来
+        val quarkFirst = appRef.quarkClient.loggedIn
+        appRef.player.clearError()
+        onlineLoadingKey = t.key
+        onlineJob?.cancel()
+        onlineJob = viewModelScope.launch {
+            val c = try {
+                appRef.playlistImport.resolveForOnlinePlay(t.toPlaylistTrack(), quarkFirst)
+            } catch (e: Exception) {
+                null
+            }
+            onlineLoadingKey = null
+            if (c == null || c.audioUrl.isBlank()) {
+                onlineHint = OnlineHint(
+                    t.key,
+                    "没找到可用音源" +
+                        if (!quarkFirst) "（没登录夸克，只试了公开源；登录夸克还能再找一次）" else "",
+                    error = true
+                )
+                return@launch
+            }
+            val track = Track(
+                key = "online:${t.key}",
+                id = t.key,
+                url = c.audioUrl,
+                fileName = "${c.title}.${c.ext.ifBlank { "mp3" }}",
+                title = c.title,
+                artist = c.artist,
+                album = c.album,
+                folder = "",
+                size = 0L,
+                mime = "audio/*",
+                durationSec = c.durationSec.toDouble(),
+                provider = "online",
+            )
+            val before = player.queue.toList()
+            resumeQueue = before
+            resumeIndex = before.indexOfFirst {
+                it.key == player.currentTrack?.key
+            }.coerceAtLeast(0)
+            resumePosMs = player.positionMs
+            // 只放这一首：临时队列，不进曲库、不留在歌单播放序列里
+            player.play(listOf(track), 0)
+            onlineKey = t.key
+            onlineHint = OnlineHint(
+                t.key,
+                buildString {
+                    append("在线播放中 · ")
+                    append(
+                        if (c.extraHeaders.containsKey("Cookie")) "夸克完整版"
+                        else "公开源${if (c.partial) "（可能是片段）" else ""}"
+                    )
+                    append(" · 点右侧图标停止")
+                }
+            )
+        }
+    }
+
+    /** 停止在线播放，把之前的队列和进度还回去。 */
+    fun stopOnline(restore: Boolean = true) {
+        onlineJob?.cancel()
+        onlineJob = null
+        onlineLoadingKey = null
+        onlineKey = null
+        onlineHint = null
+        if (restore && resumeQueue.isNotEmpty()) {
+            player.play(resumeQueue, resumeIndex, resumePosMs)
+        }
+        resumeQueue = emptyList()
+        resumePosMs = 0L
+    }
+
+    override fun onCleared() {
+        stopOnline()
+        super.onCleared()
     }
 
     // ------------------------------------------------------------ 筛选

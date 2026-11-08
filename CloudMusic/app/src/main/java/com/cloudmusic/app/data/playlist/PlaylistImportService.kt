@@ -56,6 +56,62 @@ class PlaylistImportService(
     suspend fun analyzeTrack(track: PlaylistTrack, existing: List<Track>): TrackPlan =
         withContext(Dispatchers.IO) { analyzeOne(track, existing) }
 
+    /**
+     * 歌单「在线播放」用：只解析出一条能直接拉的音频，不下载、不写曲库。
+     *
+     * 夸克登录时把网盘源提到队首（优先完整版）；没登录就直接跳过它，
+     * 只走网易云 / 酷我，省掉一轮注定失败的解析。网盘源没命中也会继续
+     * 往下试公开源，尽量让用户听得到。匹配沿用 [findCandidates] 的严格
+     * 口径，避免「同名不同歌」播错。
+     */
+    suspend fun resolveForOnlinePlay(
+        track: PlaylistTrack,
+        quarkFirst: Boolean,
+    ): AudioCandidate? = withContext(Dispatchers.IO) {
+        val quark = sources.filter { it.id == "liumingye" }
+        val public = sources.filter { it.id != "liumingye" }
+        val ordered = if (quarkFirst) quark + public else public
+
+        for (source in ordered) {
+            val raw = try {
+                when {
+                    // 网易云歌单自带歌曲 id，不用再搜一遍
+                    source.id == "netease" && track.platformId != null -> listOf(
+                        AudioCandidate(
+                            sourceId = "netease",
+                            sourceLabel = "网易云",
+                            songId = track.platformId,
+                            title = track.title,
+                            artist = track.artist,
+                            album = track.album,
+                            durationSec = track.durationSec,
+                            variantTag = TrackMatcher.variantTag(track.title, track.artist)
+                        )
+                    )
+                    else -> source.search(track.title, track.artist, track.durationSec)
+                }
+            } catch (e: Exception) {
+                // 一个源挂了就换下一个，不能连累整首歌
+                continue
+            }
+
+            val matched = raw.filter {
+                TrackMatcher.sameTitle(it.title, track.title) &&
+                    TrackMatcher.artistHit(track.artist, it.artist)
+            }.take(if (source.id == "liumingye") MAX_RESOLVE_LIUMINGYE else MAX_RESOLVE_PER_SOURCE)
+
+            for (c in matched) {
+                val r = try {
+                    source.resolve(c)
+                } catch (e: Exception) {
+                    null
+                } ?: continue
+                if (r.audioUrl.isNotBlank()) return@withContext r
+            }
+        }
+        null
+    }
+
     /** 网盘里是不是已经有这首了。 */
     fun existingStatus(track: PlaylistTrack, existing: List<Track>): TrackStatus? =
         findExisting(track, existing)
