@@ -2,6 +2,7 @@ package com.cloudmusic.app.ui
 
 import android.content.ComponentName
 import android.content.Context
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -59,6 +60,15 @@ class PlayerConnection(private val context: Context) {
         private set
 
     private var playlist: List<Track> = emptyList()
+
+    /**
+     * 媒体队列下标 → 逻辑队列（整张歌单）下标。
+     *
+     * 没下载、也还没解析出直链的占位歌只待在逻辑队列里（播放列表照常显示整张单），
+     * 不交给 ExoPlayer —— 空 URL 会直接报 Malformed URL 并把自动连播打断。
+     * 解析成功后按歌单顺序插进媒体队列，靠这张表换算位置。
+     */
+    private var mediaToLogical: List<Int> = emptyList()
 
     private fun updateNextTrack() {
         val cur = currentTrack
@@ -129,29 +139,73 @@ class PlayerConnection(private val context: Context) {
         }
         playlist = tracks
         queue = tracks
-        val items = tracks.map { toMediaItem(it) }
-        c.setMediaItems(items, startIndex.coerceIn(0, items.size - 1), startPositionMs)
+        val playable = tracks.withIndex().filter { it.value.url.isNotBlank() }
+        mediaToLogical = playable.map { it.index }
+        val items = playable.map { toMediaItem(it.value) }
+
+        // 整张单都还没解析出直链：只摆好逻辑队列，一首空 URL 都不交给
+        // ExoPlayer。等在线解析成功，replaceMediaItem 会插进来并起播。
+        if (items.isEmpty()) {
+            Log.d("CM/PlayerQueue", "逻辑队列 ${tracks.size} 首全部待解析，暂不建媒体队列")
+            currentTitle = tracks.getOrNull(startIndex)?.title.orEmpty()
+            currentArtist = tracks.getOrNull(startIndex)?.artist.orEmpty()
+            currentTrack = null
+            nextTrack = null
+            return
+        }
+
+        val wanted = startIndex.coerceIn(0, tracks.lastIndex)
+        val mediaIndex = mediaToLogical.indexOfFirst { it >= wanted }
+            .takeIf { it >= 0 } ?: items.lastIndex
+        c.setMediaItems(items, mediaIndex, startPositionMs)
         c.prepare()
         c.play()
-        currentTitle = tracks.getOrNull(startIndex)?.title.orEmpty()
-        currentArtist = tracks.getOrNull(startIndex)?.artist.orEmpty()
-        currentTrack = tracks.getOrNull(startIndex)
+        val start = tracks[mediaToLogical[mediaIndex]]
+        currentTitle = start.title
+        currentArtist = start.artist
+        currentTrack = start
         updateNextTrack()
+        Log.d(
+            "CM/PlayerQueue",
+            "建队列：逻辑 ${tracks.size} 首 / 可播 ${items.size} 首，从「${start.title}」起播"
+        )
     }
 
     /**
-     * 把队列里第 index 首原地替换成已解析好直链的 Track。
+     * 把逻辑队列第 index 首替换成已解析好直链的 Track，并按歌单顺序插进媒体队列。
      *
-     * 歌单「在线混播」用：没下载的歌先以空直链占位进队列，
-     * 轮到它之前再在线解析、原地替掉 —— 顺序不乱、播放不中断。
+     * 歌单「在线混播」用：占位歌一开始不进媒体队列，轮到它之前解析好，
+     * 再插到「后面第一首已进队列的歌」之前 —— 顺序不乱、播放不中断。
      */
     fun replaceMediaItem(index: Int, track: Track) {
         val c = controller ?: return
-        if (index < 0 || index >= playlist.size) return
+        if (index < 0 || index >= playlist.size || track.url.isBlank()) return
         val next = playlist.toMutableList().also { it[index] = track }
         playlist = next
         queue = next
-        c.replaceMediaItem(index, toMediaItem(track))
+
+        val existing = mediaToLogical.indexOf(index)
+        if (existing >= 0) {
+            c.replaceMediaItem(existing, toMediaItem(track))
+            Log.d("CM/PlayerQueue", "原地替换第 ${index + 1} 首「${track.title}」")
+            return
+        }
+        val insertAt = mediaToLogical.indexOfFirst { it > index }
+            .takeIf { it >= 0 } ?: mediaToLogical.size
+        mediaToLogical = mediaToLogical.toMutableList().also { it.add(insertAt, index) }
+        if (c.mediaItemCount == 0) {
+            // 起播时一首可播的都没有，现在终于有了：直接起播
+            c.setMediaItem(toMediaItem(track))
+            c.prepare()
+            c.play()
+            currentTrack = track
+            currentTitle = track.title
+            currentArtist = track.artist
+            updateNextTrack()
+        } else {
+            c.addMediaItem(insertAt, toMediaItem(track))
+        }
+        Log.d("CM/PlayerQueue", "插入第 ${index + 1} 首「${track.title}」→ 媒体位置 $insertAt")
     }
 
     private fun toMediaItem(t: Track): MediaItem =
@@ -178,15 +232,17 @@ class PlayerConnection(private val context: Context) {
         val c = controller ?: return
         val cur = currentTrack
         val base = if (playlist.isEmpty()) listOf(track) else playlist + track
-        val idx = cur?.let { t -> base.indexOfFirst { it.key == t.key } } ?: 0
+        val logicalIdx = cur?.let { t -> base.indexOfFirst { it.key == t.key } }?.takeIf { it >= 0 } ?: 0
         val pos = c.currentPosition
         playlist = base
         queue = base
-        c.setMediaItems(
-            base.map { toMediaItem(it) },
-            idx.coerceIn(0, base.size - 1),
-            pos
-        )
+        val playable = base.withIndex().filter { it.value.url.isNotBlank() }
+        mediaToLogical = playable.map { it.index }
+        val items = playable.map { toMediaItem(it.value) }
+        if (items.isEmpty()) return
+        val mediaIdx = mediaToLogical.indexOfFirst { it >= logicalIdx }
+            .takeIf { it >= 0 } ?: items.lastIndex
+        c.setMediaItems(items, mediaIdx, pos)
         c.prepare()
     }
 
@@ -232,10 +288,13 @@ class PlayerConnection(private val context: Context) {
     fun jumpTo(track: Track) {
         val c = controller ?: return
         val idx = playlist.indexOfFirst { it.key == track.key }
-        if (idx >= 0) {
-            c.seekTo(idx, 0L)
-            c.play()
-        }
+        if (idx < 0) return
+        // 占位歌不在媒体队列里；点它就跳到它后面第一首能播的
+        val mediaIdx = mediaToLogical.indexOf(idx).takeIf { it >= 0 }
+            ?: mediaToLogical.indexOfFirst { it > idx }.takeIf { it >= 0 }
+            ?: return
+        c.seekTo(mediaIdx, 0L)
+        c.play()
     }
 
     fun tick() {

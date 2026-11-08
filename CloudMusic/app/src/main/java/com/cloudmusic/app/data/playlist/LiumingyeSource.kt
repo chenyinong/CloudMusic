@@ -1,5 +1,6 @@
 ﻿package com.cloudmusic.app.data.playlist
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -72,8 +73,14 @@ class LiumingyeSource(private val http: OkHttpClient) {
     suspend fun search(keyword: String): List<LiumingyeHit> = withContext(Dispatchers.IO) {
         val kw = keyword.trim()
         if (kw.isEmpty()) return@withContext emptyList()
-        val json = getJson("$HOST/api/music/search?q=${enc(kw)}")
+        val json = try {
+            getJson("$HOST/api/music/search?q=${enc(kw)}")
+        } catch (e: Exception) {
+            Log.w("CM/LiumingyeHttp", "关键词「$kw」搜索失败：${e.message}")
+            throw e
+        }
         val arr = json.optJSONArray("data") ?: return@withContext emptyList()
+        Log.d("CM/LiumingyeHttp", "关键词「$kw」返回 ${arr.length()} 条")
         val out = mutableListOf<LiumingyeHit>()
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
@@ -133,6 +140,7 @@ class LiumingyeSource(private val http: OkHttpClient) {
         http.newCall(request).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) {
+                Log.w("CM/LiumingyeHttp", "HTTP ${resp.code} $url：${text.take(160)}")
                 throw LiumingyeException("HTTP ${resp.code}：${text.take(160)}")
             }
             return try {

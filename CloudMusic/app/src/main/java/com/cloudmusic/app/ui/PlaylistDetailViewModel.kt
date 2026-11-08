@@ -360,7 +360,8 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
                 tracks.firstOrNull { it.key == t.key }?.let { pendingByKey[t.key] = it }
             }
         }
-        // 第一首若是占位（没下载），先把这首选出来再播，否则一上来就空直链报错
+        // 第一首若是占位（没下载），先解析出直链再建队列；
+        // 解析不出来的占位歌根本不会进媒体队列，播放器也不会去拉空 URL。
         var firstFailed = false
         queue.getOrNull(startIndex)?.takeIf { it.url.isBlank() }?.let { first ->
             tracks.firstOrNull { it.key == first.key }?.let { saved ->
@@ -369,17 +370,18 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
                 } catch (e: Exception) {
                     null
                 }
+                // 不论成败都记下来，别让预解析再花几秒重试同一首
+                resolvedKeys.add(first.key)
                 if (c != null && c.audioUrl.isNotBlank()) {
                     queue[startIndex] = buildOnlineTrack(saved.key, c)
-                    resolvedKeys.add(first.key)
                 } else {
                     firstFailed = true
                 }
             }
         }
-        // 队列始终是整张歌单：已下载的直接播，没下载的占位歌轮到之前解析
+        // 队列始终是整张歌单：能播的进媒体队列，占位歌轮到之前解析好再插进去
         player.play(queue, startIndex)
-        startResolver()
+        startResolver(queue.getOrNull(startIndex)?.key)
         onlineLoadingKey = null
         // 只有解析失败要挂提示（留在那一行）；「在线播放中」由 hintFor
         // 按当前曲目推导，播到下一首会自动挪过去
@@ -392,9 +394,12 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
      * 盯着当前在放的那首，把它后面几首里还没解析的占位歌在线解析掉，
      * 趁当前这首还没播完（一首歌好几分钟）把直链填进队列。
      */
-    private fun startResolver() {
+    private fun startResolver(startKey: String? = null) {
         resolveJob?.cancel()
         resolveJob = viewModelScope.launch {
+            // 起播那一刻就先跑一轮：如果第一首没解析出来、媒体队列一个可播的
+            // 都没有，就不会有「切歌」事件来触发后面的预解析了。
+            if (startKey != null) resolveAround(startKey)
             snapshotFlow { player.currentTrack?.key }
                 .collect { resolveAround(it) }
         }

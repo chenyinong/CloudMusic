@@ -1,5 +1,6 @@
 ﻿package com.cloudmusic.app.data.playlist
 
+import android.util.Log
 import com.cloudmusic.app.data.quark.QuarkClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -44,9 +45,7 @@ class LiumingyeAudioSource(
             lastNote = "没登录夸克网盘，这个源没参与"
             return@withContext emptyList()
         }
-        val keywords = listOf("$title $artist", title)
-            .map { it.trim() }.filter { it.isNotEmpty() }.distinct()
-        val merged = collect(keywords)
+        val merged = collect(SearchKeywords.forTrack(title, artist))
         merged.sortedByDescending { rank(it, title, artist, durationSec) }
     }
 
@@ -69,11 +68,26 @@ class LiumingyeAudioSource(
             out
         }
 
-    /** 挨个关键词搜，同一个 id 只留一条。 */
+    /**
+     * 挨个关键词搜，同一个 id 只留一条。
+     *
+     * 每个关键词单独兜异常：这站对长关键词会直接 400，以前一个词炸了
+     * 会把整个源抛出去，连后面「纯歌名」那次兜底都跑不到 ——
+     * 夸克网盘里明明有的歌就这么被判成「没找到可用音源」。
+     */
     private suspend fun collect(keywords: List<String>): List<AudioCandidate> {
         val merged = LinkedHashMap<String, AudioCandidate>()
+        var failed = 0
         for (kw in keywords) {
-            for (h in liumingye.search(kw)) {
+            val hits = try {
+                liumingye.search(kw)
+            } catch (e: Exception) {
+                failed++
+                Log.w("CM/Liumingye", "关键词「$kw」搜索失败：${e.message}")
+                continue
+            }
+            Log.d("CM/Liumingye", "关键词「$kw」命中 ${hits.size} 条")
+            for (h in hits) {
                 if (h.id.isBlank() || merged.containsKey(h.id)) continue
                 merged[h.id] = AudioCandidate(
                     sourceId = "liumingye:${h.id}",
@@ -90,7 +104,9 @@ class LiumingyeAudioSource(
                 )
             }
         }
-        lastNote = if (merged.isEmpty()) "没搜到" else "搜到 ${merged.size} 条"
+        lastNote = if (merged.isEmpty()) {
+            if (failed > 0) "没搜到（$failed 个关键词请求失败）" else "没搜到"
+        } else "搜到 ${merged.size} 条"
         return merged.values.toList()
     }
 

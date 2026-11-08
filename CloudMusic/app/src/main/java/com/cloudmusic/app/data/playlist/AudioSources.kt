@@ -1,5 +1,6 @@
 package com.cloudmusic.app.data.playlist
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -122,11 +123,21 @@ class NeteaseAudioSource(private val http: OkHttpClient) : AudioSource {
     override suspend fun search(title: String, artist: String, durationSec: Int): List<AudioCandidate> =
         withContext(Dispatchers.IO) {
             val merged = LinkedHashMap<String, AudioCandidate>()
-            val keywords = listOf("$title $artist", title)
-                .map { it.trim() }.filter { it.isNotEmpty() }.distinct()
-            for (kw in keywords) {
-                for (c in rawSearch(kw)) if (!merged.containsKey(c.songId)) merged[c.songId] = c
+            var failed = 0
+            for (kw in SearchKeywords.forTrack(title, artist)) {
+                val hits = try {
+                    rawSearch(kw)
+                } catch (e: Exception) {
+                    failed++
+                    Log.w("CM/$id", "关键词「$kw」搜索失败：${e.message}")
+                    continue
+                }
+                Log.d("CM/$id", "关键词「$kw」命中 ${hits.size} 条")
+                for (c in hits) if (!merged.containsKey(c.songId)) merged[c.songId] = c
             }
+            lastNote = if (merged.isEmpty()) {
+                if (failed > 0) "没搜到（$failed 个关键词请求失败）" else "没搜到"
+            } else "搜到 ${merged.size} 条"
             merged.values.sortedByDescending { rank(it, title, artist, durationSec) }
         }
 
@@ -236,11 +247,21 @@ class KuwoAudioSource(private val http: OkHttpClient) : AudioSource {
     override suspend fun search(title: String, artist: String, durationSec: Int): List<AudioCandidate> =
         withContext(Dispatchers.IO) {
             val merged = LinkedHashMap<String, AudioCandidate>()
-            val keywords = listOf("$title $artist", title)
-                .map { it.trim() }.filter { it.isNotEmpty() }.distinct()
-            for (kw in keywords) {
-                for (c in rawSearch(kw)) if (!merged.containsKey(c.songId)) merged[c.songId] = c
+            var failed = 0
+            for (kw in SearchKeywords.forTrack(title, artist)) {
+                val hits = try {
+                    rawSearch(kw)
+                } catch (e: Exception) {
+                    failed++
+                    Log.w("CM/$id", "关键词「$kw」搜索失败：${e.message}")
+                    continue
+                }
+                Log.d("CM/$id", "关键词「$kw」命中 ${hits.size} 条")
+                for (c in hits) if (!merged.containsKey(c.songId)) merged[c.songId] = c
             }
+            lastNote = if (merged.isEmpty()) {
+                if (failed > 0) "没搜到（$failed 个关键词请求失败）" else "没搜到"
+            } else "搜到 ${merged.size} 条"
             merged.values.sortedByDescending { rank(it, title, artist, durationSec) }
         }
 

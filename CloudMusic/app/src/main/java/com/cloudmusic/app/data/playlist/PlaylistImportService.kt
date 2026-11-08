@@ -1,5 +1,6 @@
 package com.cloudmusic.app.data.playlist
 
+import android.util.Log
 import com.cloudmusic.app.data.Track
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -71,6 +72,12 @@ class PlaylistImportService(
         val quark = sources.filter { it.id == "liumingye" }
         val public = sources.filter { it.id != "liumingye" }
         val ordered = if (quarkFirst) quark + public else public
+        Log.d(
+            "CM/Resolve",
+            "开始「${track.title}」/「${track.artist}」 quarkFirst=$quarkFirst " +
+                "源=${ordered.joinToString(",") { it.id }} " +
+                "关键词=${SearchKeywords.forTrack(track.title, track.artist)}"
+        )
 
         for (source in ordered) {
             val raw = try {
@@ -92,6 +99,7 @@ class PlaylistImportService(
                 }
             } catch (e: Exception) {
                 // 一个源挂了就换下一个，不能连累整首歌
+                Log.w("CM/Resolve", "[${source.id}] 整源搜索失败：${e.message}", e)
                 continue
             }
 
@@ -99,16 +107,30 @@ class PlaylistImportService(
                 TrackMatcher.sameTitle(it.title, track.title) &&
                     TrackMatcher.artistHit(track.artist, it.artist)
             }.take(if (source.id == "liumingye") MAX_RESOLVE_LIUMINGYE else MAX_RESOLVE_PER_SOURCE)
+            Log.d(
+                "CM/Resolve",
+                "[${source.id}] 搜到 ${raw.size} 条 / 同名同歌手 ${matched.size} 条；${source.lastNote}"
+            )
 
             for (c in matched) {
                 val r = try {
                     source.resolve(c)
                 } catch (e: Exception) {
+                    Log.w("CM/Resolve", "[${source.id}] ${c.songId} 取直链异常：${e.message}")
                     null
-                } ?: continue
-                if (r.audioUrl.isNotBlank()) return@withContext r
+                }
+                if (r == null) {
+                    Log.d("CM/Resolve", "[${source.id}] ${c.songId} 取不到直链：${source.lastNote}")
+                    continue
+                }
+                if (r.audioUrl.isNotBlank()) {
+                    Log.d("CM/Resolve", "[${source.id}] 命中 ${c.songId}：${source.lastNote}")
+                    return@withContext r
+                }
+                Log.d("CM/Resolve", "[${source.id}] ${c.songId} 直链为空：${source.lastNote}")
             }
         }
+        Log.w("CM/Resolve", "「${track.title}」所有源都没拿到直链")
         null
     }
 
@@ -118,7 +140,7 @@ class PlaylistImportService(
 
     /** 没有音源时给用户的兜底搜索链接。 */
     fun fallbackUrl(track: PlaylistTrack): String {
-        val kw = URLEncoder.encode("${track.title} ${track.artist}", "UTF-8")
+        val kw = URLEncoder.encode(SearchKeywords.fallback(track.title, track.artist), "UTF-8")
         return FALLBACK_SEARCH + kw
     }
 
