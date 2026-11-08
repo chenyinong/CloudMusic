@@ -171,9 +171,12 @@ object TrackMatcher {
         if (n.isEmpty()) return true
         val c = norm(candidate)
         if (c.isEmpty()) return false
+        // norm 只保留字母数字，会一并去掉「& / 、」等分隔符，所以候选若是
+        // 多人拼接（如「大土班的魔仙堡&洛天依&逃跑计划」），归一化后就变成
+        // 一串；目标歌手若是其中一人，上面的 contains 已经能命中，不必再按
+        // 分隔符拆开逐个比（拆的是已归一化的串，永远只是单段，毫无意义）。
         if (c.contains(n)) return true
-        // 酷我有些歌手字段是「大土班的魔仙堡&洛天依&逃跑计划」，拆开逐个比
-        return c.split("&").any { norm(it) == n }
+        return false
     }
 
     /** 时长差在这个范围内算同一首。 */
