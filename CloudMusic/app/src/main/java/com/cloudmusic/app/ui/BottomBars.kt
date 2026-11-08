@@ -1,6 +1,8 @@
 package com.cloudmusic.app.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -51,7 +53,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeStyle
@@ -98,6 +99,7 @@ private fun frostedGlassStyle(): HazeStyle {
  *   显示的也是设备在放的那首 —— 不能让用户点「下一首」结果只有手机换歌了。
  */
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun MiniPlayerBar(
     player: PlayerConnection,
     onOpenPlayer: () -> Unit,
@@ -220,14 +222,15 @@ fun MiniPlayerBar(
                     )
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        // 参考图是「歌名 - 歌手」单行粗体
+                        // 参考图是「歌名 - 歌手」单行粗体；放不下不省略号，
+                        // 改跑马灯来回滚，歌手名也能看全
                         if (artist.isBlank()) title.ifBlank { "未知歌曲" }
                         else "${title.ifBlank { "未知歌曲" }} - $artist",
                         modifier = Modifier
                             .weight(1f)
+                            .basicMarquee()
                             .clickable(onClick = onOpenPlayer),
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Bold
                     )

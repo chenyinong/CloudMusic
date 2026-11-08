@@ -186,13 +186,7 @@ fun CloudMusicRoot(vm: AppViewModel) {
             providers = vm.connectedProviders,
             providerFilter = vm.providerFilter,
             onProviderFilterChange = { vm.providerFilter = it },
-            onOpenSettings = { vm.screen = Screen.SETTINGS },
-                            // 从列表点歌是「想听」，停在唱片页
-                            onOpenPlayer = {
-                                openAtLyrics = false
-                                playerOrigin = Screen.LIBRARY
-                                vm.screen = Screen.PLAYER
-                            }
+            onOpenSettings = { vm.screen = Screen.SETTINGS }
                         )
 
         Screen.PLAYER -> PlayerScreen(
@@ -208,12 +202,9 @@ fun CloudMusicRoot(vm: AppViewModel) {
                 vm.screen = Screen.LIBRARY
                 vm.rescanAfterImport()
             },
-            onOpenPlaylistImport = { vm.screen = Screen.PLAYLIST_IMPORT },
-            // 点「已导入」那条直接开播，播完还能看着播放器
-            onOpenPlayer = {
-                playerOrigin = Screen.IMPORT
-                vm.screen = Screen.PLAYER
-            }
+            // 已导入的行点整行只出声、留在搜歌页；想看播放页点底部迷你条，
+            // 那时 playerOrigin 会按当前页记成 IMPORT，返回仍能回到这里。
+            onOpenPlaylistImport = { vm.screen = Screen.PLAYLIST_IMPORT }
         )
 
         // 导入歌单：预览页底部有操作按钮，走统一避让（不参与滚到条后面）
@@ -247,14 +238,8 @@ fun CloudMusicRoot(vm: AppViewModel) {
             },
             onDeleted = {
                 vm.screen = Screen.PLAYLIST_LIST
-            },
-            onOpenPlayer = {
-                                openAtLyrics = false
-                                // 从歌单进来的，返回要回歌单
-                                playerOrigin = Screen.PLAYLIST_DETAIL
-                                vm.screen = Screen.PLAYER
-                            }
-                        )
+            }
+        )
 
                     Screen.SETTINGS -> Box(Modifier.padding(bottom = formPad)) {
                         SettingsScreen(vm = vm, onBack = { vm.screen = Screen.LIBRARY })

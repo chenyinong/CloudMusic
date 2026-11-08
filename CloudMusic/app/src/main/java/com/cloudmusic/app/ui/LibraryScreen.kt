@@ -72,8 +72,7 @@ fun LibraryScreen(
     providers: List<ProviderKind>,
     providerFilter: String?,
     onProviderFilterChange: (String?) -> Unit,
-    onOpenSettings: () -> Unit,
-    onOpenPlayer: () -> Unit
+    onOpenSettings: () -> Unit
 ) {
     // 排序：0 默认（网盘顺序）、1 按标题、2 按歌手 —— 点操作行右侧胶囊循环切换
     var sortMode by remember { mutableStateOf(0) }
@@ -175,9 +174,9 @@ fun LibraryScreen(
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary)
                         .clickable {
+                            // 播放全部只出声，不跳页：想看播放页点底部迷你条
                             if (filtered.isNotEmpty()) {
                                 vm.player.play(filtered, 0)
-                                onOpenPlayer()
                             }
                         },
                     contentAlignment = Alignment.Center
@@ -309,8 +308,8 @@ fun LibraryScreen(
                         showProvider = providers.size > 1,
                         playing = vm.player.currentTrack?.key == track.key,
                         onClick = {
+                            // 点歌只出声，不跳页：想看播放页点底部迷你条
                             vm.player.play(filtered, filtered.indexOf(track))
-                            onOpenPlayer()
                         },
                         onEnqueue = { vm.player.enqueue(track) },
                         onShowInfo = { infoTrack = track }

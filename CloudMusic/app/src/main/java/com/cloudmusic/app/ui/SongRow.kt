@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -41,6 +42,7 @@ import androidx.compose.ui.unit.sp
  * @param showDivider 是否画底部分隔线
  * @param trailing 右侧插槽，放操作按钮用
  * @param note 第三行的补充说明（比如导入失败的原因），有就显示
+ * @param noteColor 补充说明的颜色；不传走 error 红，搜歌页的试听提示传中性灰
  */
 @Composable
 fun SongRow(
@@ -51,6 +53,7 @@ fun SongRow(
     modifier: Modifier = Modifier,
     playing: Boolean = false,
     note: String = "",
+    noteColor: Color? = null,
     index: Int? = null,
     badge: String? = null,
     showDivider: Boolean = true,
@@ -145,7 +148,7 @@ fun SongRow(
                     Text(
                         note,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
+                        color = noteColor ?: MaterialTheme.colorScheme.error,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )

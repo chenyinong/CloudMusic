@@ -27,6 +27,18 @@ import kotlinx.coroutines.sync.Semaphore
 import org.json.JSONObject
 import java.io.File
 
+/**
+ * 试听提示，按搜索结果条目挂。
+ *
+ * 之前统一放在列表上方，用户往下滑几屏就完全看不见了 ——
+ * 提示必须跟它对应的那首歌待在一起。
+ */
+data class PreviewHint(
+    val id: String,
+    val text: String,
+    val error: Boolean = false,
+)
+
 /** 一首歌的导入进度。 */
 data class ImportState(
     val phase: String = "",
@@ -163,6 +175,28 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 播放器报错（试听遇到 412 / 直链失效会落到这里）。 */
     val playbackError: String? get() = appRef.player.errorText
+
+    /** 试听的行内提示：成功 / 解析失败，只挂在对应的结果行下面。 */
+    var previewHint by mutableStateOf<PreviewHint?>(null)
+        private set
+
+    /**
+     * 给列表行取提示。
+     *
+     * 拉流报错是异步来的（夸克 Cookie 过期会 412），这里把它和本行的
+     * 试听状态合并成一条，不用在列表顶部再单独挂一行。
+     */
+    fun hintFor(id: String): PreviewHint? {
+        val err = playbackError
+        if (previewId == id && err != null) {
+            return PreviewHint(
+                id,
+                "试听没播出来：$err · 夸克 Cookie 可能已过期，去设置重新登录再试",
+                error = true
+            )
+        }
+        return previewHint?.takeIf { it.id == id }
+    }
 
     /** 试听前记下的现场，停止时原样还回去。 */
     private var resumeQueue: List<Track> = emptyList()
@@ -530,7 +564,11 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
             previewLoadingId = null
             val url = resolved?.directUrl?.takeIf { it.isNotBlank() }
             if (resolved == null || url == null) {
-                message = "试听失败：拿不到音频直链（夸克要先登录，分享也可能已失效）"
+                previewHint = PreviewHint(
+                    hit.id,
+                    "试听失败：拿不到音频直链（夸克要先登录，分享也可能已失效）",
+                    error = true
+                )
                 return@launch
             }
             val track = Track(
@@ -556,11 +594,18 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
             // 只放这一首：临时队列，不进曲库、不留在歌单
             appRef.player.play(listOf(track), 0)
             previewId = hit.id
-            message = if (resolved.extraHeaders.containsKey("Cookie")) {
-                "正在试听《${hit.title}》· 夸克完整版，再点一次停止"
-            } else {
-                "正在试听《${hit.title}》（可能是片段），再点一次停止"
-            }
+            // 行内已经有歌名了，文案精简成来源 + 怎么停止
+            previewHint = PreviewHint(
+                hit.id,
+                buildString {
+                    append("试听中 · ")
+                    append(
+                        if (resolved.extraHeaders.containsKey("Cookie")) "夸克完整版"
+                        else "公开源（可能是片段）"
+                    )
+                    append(" · 再点一次停止")
+                }
+            )
         }
     }
 
@@ -570,9 +615,9 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         previewJob = null
         previewLoadingId = null
         previewId = null
+        previewHint = null
         if (restore && resumeQueue.isNotEmpty()) {
             appRef.player.play(resumeQueue, resumeIndex, resumePosMs)
-            message = "已停止试听，恢复原来的播放"
         }
         resumeQueue = emptyList()
         resumePosMs = 0L

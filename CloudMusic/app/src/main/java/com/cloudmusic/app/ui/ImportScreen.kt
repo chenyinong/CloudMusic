@@ -17,13 +17,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -62,8 +59,7 @@ import com.cloudmusic.app.data.ProviderKind
 fun ImportScreen(
     providers: List<ProviderKind>,
     onBack: () -> Unit,
-    onOpenPlaylistImport: () -> Unit,
-    onOpenPlayer: () -> Unit
+    onOpenPlaylistImport: () -> Unit
 ) {
     val vm: ImportViewModel = viewModel()
     val visible = remember(vm.hits, vm.sourceFilter) { vm.visibleHits }
@@ -153,14 +149,9 @@ fun ImportScreen(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        // 试听拉流失败（多半是夸克 Cookie 过期 / 412）要看得见原因
-                        if (vm.previewId != null && vm.playbackError != null) {
-                            Text(
-                                "试听没播出来：${vm.playbackError} · 夸克 Cookie 可能已过期，去设置重新登录再试",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
+                        // 试听提示（成功 / 失败 / 拉流报错）现在挂在对应结果行里，
+                        // 不再放吸顶区 —— 列表往下滑就看不见了。
+
                         Spacer(Modifier.height(10.dp))
                     }
                 }
@@ -371,13 +362,13 @@ fun ImportScreen(
                         state = vm.states[hit.id],
                         deleting = hit.id in vm.deletingIds,
                         previewing = vm.previewId == hit.id,
-                        previewLoading = vm.previewLoadingId == hit.id,
+                        hint = vm.hintFor(hit.id),
                         onImport = { vm.import(hit) },
                         onPreview = { vm.preview(hit) },
                         onPlay = {
-                            // 已经导进网盘了，直接播 —— 别再下一遍
+                            // 已经导进网盘了，直接播 —— 别再下一遍。
+                            // 只出声、不跳播放页：用户还想留在这页继续挑歌。
                             if (!vm.playImported(hit)) vm.import(hit)
-                            onOpenPlayer()
                         },
                         onDelete = { pendingDelete = hit }
                     )
@@ -442,8 +433,10 @@ private fun HitRow(
     hit: MusicHit,
     state: ImportState?,
     deleting: Boolean,
+    /** 正在试听这首 —— 歌名染主题色；再点一次会停止 */
     previewing: Boolean,
-    previewLoading: Boolean,
+    /** 试听提示：挂在这一行，跟着列表滚 */
+    hint: PreviewHint?,
     onImport: () -> Unit,
     onPreview: () -> Unit,
     onPlay: () -> Unit,
@@ -457,18 +450,19 @@ private fun HitRow(
         subtitle = listOf(hit.artist, hit.album)
             .filter { it.isNotBlank() }
             .joinToString(" · "),
-        note = "",
+        // 试听提示就显示在这首歌下面，跟着列表一起滚
+        note = hint?.text.orEmpty(),
+        // note 默认 error 红（本来是给导入失败用的）；试听中用中性灰，别看着像报错
+        noteColor = if (hint?.error == true) null
+        else MaterialTheme.colorScheme.onSurfaceVariant,
         // QQ 的搜索结果不带封面
         showCover = false,
+        playing = previewing,
         onClick = {
-            when {
-                // 已经导进网盘了 —— 直接播，别再下一遍
-                playable -> onPlay()
-                // 正在导入中就别重复触发
-                st == null || st.failed -> onImport()
-                // 标着「已导入」但拿不到曲目（比如网盘断了）：重新导一次
-                else -> onImport()
-            }
+            // 已经导进网盘的照旧直接播；其余一律试听（不下载、不写库）。
+            // vm.preview 自己是 toggle：正在试听这首时再点一次就停止并恢复现场。
+            // 下载只走右边的「导入」按钮，别让点一下歌名就把歌往网盘搬。
+            if (playable) onPlay() else onPreview()
         }
     ) {
         Column(
@@ -496,111 +490,82 @@ private fun HitRow(
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(4.dp))
-            // 操作区也固定 30dp，状态切换只换内容不换高度。
+            // 右侧只留一个状态控件，高度固定 30dp，状态切换只换内容不换高度。
+            // 试听走整行点击、下载走「导入」按钮，两者不再各占一个控件。
             // 注意不能加 fillMaxWidth —— 它会在 Row 里先把整行宽度吃光，
             // 左边 weight(1f) 的歌名歌手就被压成 0 宽度（字直接消失）。
-            Row(
+            Box(
                 Modifier.height(30.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                contentAlignment = Alignment.CenterEnd
             ) {
-                // 试听：不下载、不写库，直接拉直链；再点一次停止并恢复原来的播放
-                Box(
-                    Modifier
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (previewing) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.surfaceVariant
-                        )
-                        .clickable(onClick = onPreview),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (previewLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(14.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(
-                            if (previewing) Icons.Filled.Close else Icons.Filled.PlayArrow,
-                            contentDescription = if (previewing) "停止试听" else "试听",
-                            tint = if (previewing) MaterialTheme.colorScheme.onPrimary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp)
+                when {
+                    st == null -> Box(
+                        Modifier
+                            .height(30.dp)
+                            .clip(RoundedCornerShape(15.dp))
+                            .background(MaterialTheme.colorScheme.primary)
+                            .clickable(onClick = onImport)
+                            .padding(horizontal = 14.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "导入",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onPrimary
                         )
                     }
-                }
-                Box(contentAlignment = Alignment.CenterEnd) {
-                    when {
-                        st == null -> Box(
-                            Modifier
-                                .height(30.dp)
-                                .clip(RoundedCornerShape(15.dp))
-                                .background(MaterialTheme.colorScheme.primary)
-                                .clickable(onClick = onImport)
-                                .padding(horizontal = 14.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                "导入",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                        }
-                        st.done -> Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                // 「已导入」点一下就是播放，标出来免得以为还要再导一次
-                                if (playable) "已导入 · 播放" else st.phase,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                maxLines = 1
-                            )
-                            // 导错了要能删掉 —— 删的是网盘里的文件本体
-                            if (playable) {
-                                Spacer(Modifier.width(2.dp))
-                                IconButton(
-                                    onClick = onDelete,
-                                    enabled = !deleting,
-                                    modifier = Modifier.size(28.dp)
-                                ) {
-                                    if (deleting) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(14.dp),
-                                            strokeWidth = 2.dp
-                                        )
-                                    } else {
-                                        Icon(
-                                            Icons.Outlined.Delete,
-                                            contentDescription = "从网盘删除",
-                                            modifier = Modifier.size(18.dp),
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
+                    st.done -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            // 「已导入」点一下就是播放，标出来免得以为还要再导一次
+                            if (playable) "已导入 · 播放" else st.phase,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1
+                        )
+                        // 导错了要能删掉 —— 删的是网盘里的文件本体
+                        if (playable) {
+                            Spacer(Modifier.width(2.dp))
+                            IconButton(
+                                onClick = onDelete,
+                                enabled = !deleting,
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                if (deleting) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Outlined.Delete,
+                                        contentDescription = "从网盘删除",
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
                         }
-                        st.failed -> Text(
-                            // 失败原因放右边这块固定区域，别塞到左边第三行 ——
-                            // 左边多一行，整行高度就变了，列表会跟着跳
-                            st.message.ifBlank { st.phase },
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.error,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                    }
+                    st.failed -> Text(
+                        // 失败原因放右边这块固定区域，别塞到左边第三行 ——
+                        // 左边多一行，整行高度就变了，列表会跟着跳
+                        st.message.ifBlank { st.phase },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    else -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
                         )
-                        else -> Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(Modifier.size(6.dp))
-                            Text(
-                                st.phase,
-                                style = MaterialTheme.typography.labelMedium,
-                                maxLines = 1
-                            )
-                        }
+                        Spacer(Modifier.size(6.dp))
+                        Text(
+                            st.phase,
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1
+                        )
                     }
                 }
             }

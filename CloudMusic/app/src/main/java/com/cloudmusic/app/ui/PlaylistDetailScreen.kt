@@ -76,8 +76,6 @@ fun PlaylistDetailScreen(
     providers: List<ProviderKind>,
     onBack: () -> Unit,
     onDeleted: () -> Unit,
-    /** 点了「播放」之后跳到播放页 */
-    onOpenPlayer: () -> Unit,
 ) {
     val vm: PlaylistDetailViewModel = viewModel()
     val context = LocalContext.current
@@ -171,8 +169,8 @@ fun PlaylistDetailScreen(
                         Modifier
                             .fillMaxWidth()
                             .clickable {
+                                // 播放全部也只出声，不跳页：想看播放页点底部迷你条
                                 vm.playAll()
-                                onOpenPlayer()
                             }
                             .padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -253,8 +251,10 @@ fun PlaylistDetailScreen(
                         onOnlinePlay = { vm.playOnline(t) },
                         onImport = { vm.importTrack(t) },
                         onPlay = {
+                            // 已存在的歌点整行：只用网盘文件出声，不跳播放页。
+                            // 想看播放页点底部迷你条，那时 playerOrigin 会按当前页
+                            // 记成 PLAYLIST_DETAIL，返回仍能回到这张歌单。
                             vm.playTrack(t)
-                            onOpenPlayer()
                         },
                         onFallback = {
                             val url = vm.fallbackUrl(t)
