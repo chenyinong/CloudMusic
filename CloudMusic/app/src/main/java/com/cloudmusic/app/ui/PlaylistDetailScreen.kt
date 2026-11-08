@@ -26,8 +26,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -82,7 +82,8 @@ fun PlaylistDetailScreen(
 
     LaunchedEffect(playlistKey) { vm.load(playlistKey) }
 
-    // 离开歌单详情页就收掉在线播放，别把临时单曲队列带到别的页面
+    // 离开歌单详情页只收掉在线试听 UI，播放队列保持整张歌单不动 ——
+    // 以前这里会回放「试听前的旧队列」，点 mini 条进播放页就跳到别的歌。
     DisposableEffect(playlistKey) {
         onDispose { vm.stopOnline() }
     }
@@ -234,6 +235,8 @@ fun PlaylistDetailScreen(
                     }
                 }
             } else {
+                // 当前播放落在歌单的哪一项：高亮、停止按钮、状态提示都跟着它走
+                val currentKey = vm.currentPlaylistKey
                 items(list, key = { it.key }) { t ->
                     DetailTrackRow(
                         index = t.position + 1,
@@ -242,10 +245,10 @@ fun PlaylistDetailScreen(
                         inLibrary = t.key in vm.inLibrary,
                         // 网盘里真能找到这个文件才给「播放」
                         playable = t.key in vm.libraryTracks,
-                        // 注意别写成 `a == b`：两边都是 null 时会误判成「正在播放」
-                        playing = vm.libraryTracks[t.key]?.key
-                            ?.let { vm.player.currentTrack?.key == it } == true,
-                        onlinePlaying = vm.onlineKey == t.key,
+                        // 已下载 / 在线解析的歌统一按当前曲目算，播到下一首会自己挪
+                        playing = currentKey == t.key,
+                        onlinePlaying = currentKey == t.key && vm.currentIsOnline,
+                        isPlaying = vm.player.playing,
                         onlineLoading = vm.onlineLoadingKey == t.key,
                         hint = vm.hintFor(t.key),
                         onOnlinePlay = { vm.playOnline(t) },
@@ -451,6 +454,8 @@ private fun DetailTrackRow(
     /** 正在放这首 */
     playing: Boolean,
     onlinePlaying: Boolean,
+    /** 播放器当前是否在出声（决定右侧按钮显示暂停还是继续） */
+    isPlaying: Boolean,
     onlineLoading: Boolean,
     /** 在线播放的行内提示：挂在这一行，跟着列表滚 */
     hint: OnlineHint?,
@@ -585,11 +590,11 @@ private fun DetailTrackRow(
                     .clickable(onClick = onOnlinePlay),
                 contentAlignment = Alignment.Center
             ) {
-                // 实心圆角方块：标准的停止符号，一眼能认。
-                // 之前用空心描边方块跟线性云图标配套，结果被看成了复选框。
+                // 跟当前曲目走：正在放显示暂停、已暂停显示继续，点一下切换。
+                // 以前是个「停止」方块，但停止后无法恢复，等于死锁。
                 Icon(
-                    Icons.Filled.Stop,
-                    contentDescription = "停止在线播放",
+                    if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = if (isPlaying) "暂停" else "继续",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(17.dp)
                 )

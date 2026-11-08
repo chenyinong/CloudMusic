@@ -23,6 +23,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.runtime.snapshotFlow
 
 /** 一首歌在导入过程中的临时状态。 */
 data class TrackPhase(
@@ -87,10 +88,39 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * 这张歌单里能播的歌，按歌单顺序排。
      *
-     * 播放队列就是它 —— 从歌单里点一首，能连着把整张单听下去。
+     * 下载好的直接用网盘文件；没下载的先用空直链占位 —— 轮到它之前
+     * 再在线解析（见 startMixedPlayback），所以整张单都能成列表连续播，
+     * 不用先一首首导进网盘。
      */
     val playableTracks: List<Track>
-        get() = tracks.mapNotNull { libraryTracks[it.key] }
+        get() = tracks.map { libraryTracks[it.key] ?: placeholderTrack(it) }
+
+    /** 没下载的歌：先用空直链占位进播放队列，播到它之前再解析。 */
+    private fun placeholderTrack(t: SavedTrack) = Track(
+        key = t.key,
+        id = t.key,
+        url = "",
+        fileName = "",
+        title = t.title,
+        artist = t.artist,
+        album = t.album,
+        folder = "",
+        size = 0L,
+        mime = "audio/*",
+        durationSec = 0.0,
+        provider = "online-pending",
+    )
+
+    /** 在线混播时，当前这首往后预解析几首，趁当前这首还没播完把直链填好。 */
+    private val LOOKAHEAD = 3
+
+    /** 混播里还没解析的占位歌：key → 歌单条目。 */
+    private val pendingByKey = mutableMapOf<String, SavedTrack>()
+    /** 已经在线解析过直链的 key，避免重复解析 / 死循环。 */
+    private val resolvedKeys = mutableSetOf<String>()
+    /** 混播时的歌单顺序，用来定位「当前这首」前后要解析哪些。 */
+    private var queueOrder: List<String> = emptyList()
+    private var resolveJob: Job? = null
 
     var phases by mutableStateOf<Map<String, TrackPhase>>(emptyMap())
         private set
@@ -115,10 +145,6 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
     var cloudReady by mutableStateOf(false)
         private set
 
-    /** 正在在线播放的歌单条目 key；null = 没在播。 */
-    var onlineKey by mutableStateOf<String?>(null)
-        private set
-
     /** 正在解析直链的 key（夸克那几步请求要几秒，按钮转圈）。 */
     var onlineLoadingKey by mutableStateOf<String?>(null)
         private set
@@ -131,28 +157,56 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
         private set
 
     /**
+     * 当前播放器里那首歌，对应到这张歌单的哪个条目。
+     *
+     * 在线混播的歌 key 是 "online:<条目key>"；已下载的歌用网盘文件
+     * 自己的 key，得反查 libraryTracks。不属于这张单就返回 null ——
+     * 在别的页面点歌时，歌单里不会留一个假高亮。
+     */
+    val currentPlaylistKey: String?
+        get() {
+            val key = player.currentTrack?.key ?: return null
+            if (key.startsWith("online:")) {
+                val k = key.removePrefix("online:")
+                return k.takeIf { c -> tracks.any { it.key == c } }
+            }
+            return libraryTracks.entries.firstOrNull { it.value.key == key }?.key
+        }
+
+    /** 当前这首是不是在线解析来的（决定要不要显示「停止在线播放」）。 */
+    val currentIsOnline: Boolean
+        get() = player.currentTrack?.key?.startsWith("online:") == true
+
+    /**
      * 给列表行取提示。
      *
-     * 拉流报错是异步来的（夸克 Cookie 过期会 412），这里把它和本行的
-     * 在线状态合并成一条，不用在列表顶部再单独挂一行。
+     * 「在线播放中」直接从当前曲目推导 —— 播到下一首，提示自己挪到下一行，
+     * 不用一个 key 状态去追着改。解析失败的原因留在它自己那一行
+     * （那是那首歌的属性，不是播放状态）。
      */
     fun hintFor(key: String): OnlineHint? {
+        onlineHint?.takeIf { it.error && it.key == key }?.let { return it }
+        if (key != currentPlaylistKey || !currentIsOnline) return null
         val err = playbackError
-        if (onlineKey == key && err != null) {
-            return OnlineHint(
+        return if (err != null) {
+            OnlineHint(
                 key,
                 "在线播放失败：$err · 夸克 Cookie 可能已过期，去设置重新登录再试",
                 error = true
             )
+        } else {
+            OnlineHint(key, "在线播放中 · 整张歌单连着播 · 点右侧图标暂停")
         }
-        return onlineHint?.takeIf { it.key == key }
     }
 
-    /** 在线播放前的现场，停止时原样还回去。 */
-    private var resumeQueue: List<Track> = emptyList()
-    private var resumeIndex = 0
-    private var resumePosMs = 0L
+    /** 在线解析 / 起播的协程，快速切歌时把上一首的活取消掉。 */
     private var onlineJob: Job? = null
+
+    /** 只清行内试听 UI，不动播放队列、也不取消正在跑的起播协程。 */
+    private fun clearOnlineUi() {
+        onlineLoadingKey = null
+        onlineHint = null
+    }
 
     // ------------------------------------------------------------ 载入
 
@@ -263,116 +317,166 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * 播放歌单里的这一首。
+     * 从这张歌单的某一首开始播。
      *
-     * 播放队列是这张歌单里所有已导入的歌（按歌单顺序），
-     * 所以能一首接一首听下去。
+     * 队列是整张单（下载好的 + 没下载的占位），没下载的歌轮到之前
+     * 会在线解析，所以能一首接一首听下去。
      */
     fun playTrack(t: SavedTrack) {
-        val target = libraryTracks[t.key] ?: return
         val queue = playableTracks
-        val index = queue.indexOfFirst { it.key == target.key }
-        if (index < 0) {
-            message = "这首歌在网盘里找不到了"
-            return
-        }
-        player.play(queue, index)
+        // 已下载的歌用网盘文件的 key，没下载的占位歌用歌单条目 key
+        val targetKey = libraryTracks[t.key]?.key ?: t.key
+        val index = queue.indexOfFirst { it.key == targetKey }
+        if (index < 0) return
+        viewModelScope.launch { startMixedPlayback(queue, index) }
     }
 
-    /** 从头开始播这张歌单里已导入的所有歌。 */
+    /** 从头开始播整张单（下载好的 + 没下载的占位，播到再解析）。 */
     fun playAll() {
         val queue = playableTracks
         if (queue.isEmpty()) return
-        player.play(queue, 0)
+        viewModelScope.launch { startMixedPlayback(queue, 0) }
     }
 
     /**
-     * 在线播放：不用先导入网盘也能听。
-     *
-     * 夸克登录 → 网盘源排最前拿完整版；没登录 → 只走网易云 / 酷我。
-     * 直链是即点即解析的（带 auth_key、有时效），不缓存不写库。
+     * 歌单「在线混播」：已下载的直接播，没下载的以占位进队列，
+     * 轮到它之前再在线解析直链、原地替掉（resolveAround），顺序不乱、播放不中断。
      */
-    fun playOnline(t: SavedTrack) {
-        // 再点一次 = 停止并恢复原来的播放
-        if (onlineKey == t.key) {
-            stopOnline()
-            return
-        }
-        // 换一首时不必把上次的现场恢复一遍，直接接着替换队列
-        stopOnline(restore = false)
-        // 每次点都读最新登录态：用户可能刚在设置里登录夸克又返回来
-        val quarkFirst = appRef.quarkClient.loggedIn
+    private suspend fun startMixedPlayback(
+        rawQueue: List<Track>,
+        startIndex: Int,
+        /** 从某一行点进来的：队列建好后给那行挂提示 / 高亮 */
+        hintKey: String? = null,
+    ) {
+        clearOnlineUi()
         appRef.player.clearError()
-        onlineLoadingKey = t.key
-        onlineJob?.cancel()
-        onlineJob = viewModelScope.launch {
+        if (hintKey != null) onlineLoadingKey = hintKey
+        pendingByKey.clear()
+        resolvedKeys.clear()
+        val queue = rawQueue.toMutableList()
+        queueOrder = queue.map { it.key }
+        queue.forEach { t ->
+            if (t.url.isBlank()) {
+                tracks.firstOrNull { it.key == t.key }?.let { pendingByKey[t.key] = it }
+            }
+        }
+        // 第一首若是占位（没下载），先把这首选出来再播，否则一上来就空直链报错
+        var firstFailed = false
+        queue.getOrNull(startIndex)?.takeIf { it.url.isBlank() }?.let { first ->
+            tracks.firstOrNull { it.key == first.key }?.let { saved ->
+                val c = try {
+                    appRef.playlistImport.resolveForOnlinePlay(saved.toPlaylistTrack(), appRef.quarkClient.loggedIn)
+                } catch (e: Exception) {
+                    null
+                }
+                if (c != null && c.audioUrl.isNotBlank()) {
+                    queue[startIndex] = buildOnlineTrack(saved.key, c)
+                    resolvedKeys.add(first.key)
+                } else {
+                    firstFailed = true
+                }
+            }
+        }
+        // 队列始终是整张歌单：已下载的直接播，没下载的占位歌轮到之前解析
+        player.play(queue, startIndex)
+        startResolver()
+        onlineLoadingKey = null
+        // 只有解析失败要挂提示（留在那一行）；「在线播放中」由 hintFor
+        // 按当前曲目推导，播到下一首会自动挪过去
+        if (hintKey != null && firstFailed) {
+            onlineHint = OnlineHint(hintKey, "没找到可用音源（登录夸克还能再找一次）", error = true)
+        }
+    }
+
+    /**
+     * 盯着当前在放的那首，把它后面几首里还没解析的占位歌在线解析掉，
+     * 趁当前这首还没播完（一首歌好几分钟）把直链填进队列。
+     */
+    private fun startResolver() {
+        resolveJob?.cancel()
+        resolveJob = viewModelScope.launch {
+            snapshotFlow { player.currentTrack?.key }
+                .collect { resolveAround(it) }
+        }
+    }
+
+    private suspend fun resolveAround(rawKey: String?) {
+        val curKey = rawKey?.removePrefix("online:") ?: return
+        val idx = queueOrder.indexOf(curKey)
+        if (idx < 0) return
+        val quarkFirst = appRef.quarkClient.loggedIn
+        for (i in idx..minOf(idx + LOOKAHEAD, queueOrder.lastIndex)) {
+            val key = queueOrder[i]
+            if (key in resolvedKeys) continue
+            val saved = pendingByKey[key] ?: continue
             val c = try {
-                appRef.playlistImport.resolveForOnlinePlay(t.toPlaylistTrack(), quarkFirst)
+                appRef.playlistImport.resolveForOnlinePlay(saved.toPlaylistTrack(), quarkFirst)
             } catch (e: Exception) {
                 null
             }
-            onlineLoadingKey = null
-            if (c == null || c.audioUrl.isBlank()) {
-                onlineHint = OnlineHint(
-                    t.key,
-                    "没找到可用音源" +
-                        if (!quarkFirst) "（没登录夸克，只试了公开源；登录夸克还能再找一次）" else "",
-                    error = true
-                )
-                return@launch
-            }
-            val track = Track(
-                key = "online:${t.key}",
-                id = t.key,
-                url = c.audioUrl,
-                fileName = "${c.title}.${c.ext.ifBlank { "mp3" }}",
-                title = c.title,
-                artist = c.artist,
-                album = c.album,
-                folder = "",
-                size = 0L,
-                mime = "audio/*",
-                durationSec = c.durationSec.toDouble(),
-                provider = "online",
-            )
-            val before = player.queue.toList()
-            resumeQueue = before
-            resumeIndex = before.indexOfFirst {
-                it.key == player.currentTrack?.key
-            }.coerceAtLeast(0)
-            resumePosMs = player.positionMs
-            // 只放这一首：临时队列，不进曲库、不留在歌单播放序列里
-            player.play(listOf(track), 0)
-            onlineKey = t.key
-            onlineHint = OnlineHint(
-                t.key,
-                buildString {
-                    append("在线播放中 · ")
-                    append(
-                        if (c.extraHeaders.containsKey("Cookie")) "夸克完整版"
-                        else "公开源${if (c.partial) "（可能是片段）" else ""}"
-                    )
-                    append(" · 点右侧图标停止")
-                }
-            )
+            // 解析不到也标记为已处理，避免反复重试拖死循环
+            resolvedKeys.add(key)
+            if (c == null || c.audioUrl.isBlank()) continue
+            player.replaceMediaItem(i, buildOnlineTrack(key, c))
+        }
+        // 全部解析完就收摊，别一直挂着
+        if (pendingByKey.isNotEmpty() && resolvedKeys.containsAll(pendingByKey.keys)) {
+            resolveJob?.cancel()
         }
     }
 
-    /** 停止在线播放，把之前的队列和进度还回去。 */
-    fun stopOnline(restore: Boolean = true) {
+    /** 把在线解析结果拼成一首可播的 Track（和单曲试听同一个拼法）。 */
+    private fun buildOnlineTrack(key: String, c: AudioCandidate) = Track(
+        key = "online:$key",
+        id = key,
+        url = c.audioUrl,
+        fileName = "${c.title}.${c.ext.ifBlank { "mp3" }}",
+        title = c.title,
+        artist = c.artist,
+        album = c.album,
+        folder = "",
+        size = 0L,
+        mime = "audio/*",
+        durationSec = c.durationSec.toDouble(),
+        provider = "online",
+    )
+
+    /**
+     * 点没下载的歌：从这首开始播整张歌单。
+     *
+     * 以前这里会把队列换成「只有这一首」再事后恢复，结果不是跳歌就是
+     * 播放列表只剩一首。现在统一走混播队列 —— 队列里始终是整张单，
+     * 这首在线解析出来后接着往后播。
+     */
+    fun playOnline(t: SavedTrack) {
+        // 点当前正在播的这首在线歌 = 暂停 / 继续，队列保持整张歌单不动
+        if (currentPlaylistKey == t.key && currentIsOnline) {
+            player.toggle()
+            return
+        }
+        stopOnline()
+        val queue = playableTracks
+        val idx = queue.indexOfFirst { it.key == (libraryTracks[t.key]?.key ?: t.key) }
+        if (idx < 0) return
+        onlineJob = viewModelScope.launch {
+            startMixedPlayback(queue, idx, hintKey = t.key)
+        }
+    }
+
+    /**
+     * 清掉行内在线试听 UI、取消没跑完的解析。
+     *
+     * 以前这里会「回放试听前的旧队列」，离开页面要么跳到别的歌、
+     * 要么播放列表只剩一首。现在队列始终由混播持有，这里绝不动播放器。
+     */
+    fun stopOnline() {
         onlineJob?.cancel()
         onlineJob = null
-        onlineLoadingKey = null
-        onlineKey = null
-        onlineHint = null
-        if (restore && resumeQueue.isNotEmpty()) {
-            player.play(resumeQueue, resumeIndex, resumePosMs)
-        }
-        resumeQueue = emptyList()
-        resumePosMs = 0L
+        clearOnlineUi()
     }
 
     override fun onCleared() {
+        // 只收 UI 和协程：队列归播放器，别在这里动
         stopOnline()
         super.onCleared()
     }

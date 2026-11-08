@@ -139,6 +139,21 @@ class PlayerConnection(private val context: Context) {
         updateNextTrack()
     }
 
+    /**
+     * 把队列里第 index 首原地替换成已解析好直链的 Track。
+     *
+     * 歌单「在线混播」用：没下载的歌先以空直链占位进队列，
+     * 轮到它之前再在线解析、原地替掉 —— 顺序不乱、播放不中断。
+     */
+    fun replaceMediaItem(index: Int, track: Track) {
+        val c = controller ?: return
+        if (index < 0 || index >= playlist.size) return
+        val next = playlist.toMutableList().also { it[index] = track }
+        playlist = next
+        queue = next
+        c.replaceMediaItem(index, toMediaItem(track))
+    }
+
     private fun toMediaItem(t: Track): MediaItem =
         MediaItem.Builder()
             .setUri(t.url)
