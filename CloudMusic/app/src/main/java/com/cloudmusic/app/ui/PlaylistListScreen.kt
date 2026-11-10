@@ -52,6 +52,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.cloudmusic.app.data.Track
 import com.cloudmusic.app.data.playlist.SavedPlaylist
 
 /**
@@ -181,6 +182,7 @@ fun PlaylistListScreen(
                         PlaylistCard(
                             playlist = p,
                             imported = vm.importedCounts[p.key] ?: 0,
+                            coverTrack = vm.coverTracks[p.key],
                             onClick = { onOpenPlaylist(p.key) },
                             onDelete = { vm.delete(p.key) }
                         )
@@ -244,14 +246,14 @@ private fun PlaylistListHeader(
 /**
  * 一张歌单一张白卡。
  *
- * 封面直接复用曲库那套程序化插画 [GeneratedCover]：按歌单名生成，
- * 不用联网，也不用给歌单表加封面字段；以后拿到真实封面 URL 时，
- * 只要把这块换掉就行。
+ * 封面借用歌单里某首歌的封面（[CoverThumb] 会自己查缓存 / 在线检索），
+ * 不用给歌单表加封面字段；实在找不到才回退到程序化占位画。
  */
 @Composable
 private fun PlaylistCard(
     playlist: SavedPlaylist,
     imported: Int,
+    coverTrack: Track?,
     onClick: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -268,24 +270,12 @@ private fun PlaylistCard(
             .padding(10.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(60.dp)
-                    .clip(RoundedCornerShape(10.dp))
-            ) {
-                GeneratedCover(seed = playlist.name, modifier = Modifier.fillMaxSize())
-                Text(
-                    playlist.platform.label,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                    color = Color.White,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(5.dp)
-                        .clip(RoundedCornerShape(5.dp))
-                        .background(Color.Black.copy(alpha = 0.42f))
-                        .padding(horizontal = 5.dp, vertical = 2.dp)
-                )
-            }
+            CoverThumb(
+                track = coverTrack,
+                seed = playlist.name,
+                size = 60.dp,
+                corner = 10.dp
+            )
 
             Spacer(Modifier.width(11.dp))
 

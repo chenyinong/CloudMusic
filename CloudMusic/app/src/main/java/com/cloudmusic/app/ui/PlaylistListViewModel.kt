@@ -7,7 +7,9 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.cloudmusic.app.App
+import com.cloudmusic.app.data.Track
 import com.cloudmusic.app.data.playlist.SavedPlaylist
+import com.cloudmusic.app.data.playlist.TrackMatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -15,13 +17,18 @@ import kotlinx.coroutines.withContext
 /** 「我的歌单」列表。 */
 class PlaylistListViewModel(app: Application) : AndroidViewModel(app) {
 
-    private val store = (app as App).playlistStore
+    private val appRef: App = app as App
+    private val store = appRef.playlistStore
 
     var playlists by mutableStateOf<List<SavedPlaylist>>(emptyList())
         private set
 
     /** 每张歌单已经导入了几首 */
     var importedCounts by mutableStateOf<Map<String, Int>>(emptyMap())
+        private set
+
+    /** 每张歌单借哪首歌的封面来当歌单封面 */
+    var coverTracks by mutableStateOf<Map<String, Track>>(emptyMap())
         private set
 
     var loading by mutableStateOf(false)
@@ -55,10 +62,37 @@ class PlaylistListViewModel(app: Application) : AndroidViewModel(app) {
             val counts = withContext(Dispatchers.IO) {
                 list.associate { it.key to store.importedCount(it.key) }
             }
+            val covers = withContext(Dispatchers.IO) { coverTracksFor(list) }
             playlists = list
             importedCounts = counts
+            coverTracks = covers
             loading = false
         }
+    }
+
+    /**
+     * 歌单封面借用里面某一首歌的封面：优先取网盘里真实存在的文件，
+     * 这样能直接命中曲库已有的封面缓存；一首都对不上就造一个只有
+     * 歌名/歌手的 Track，让 CoverRepository 去在线检索。
+     */
+    private fun coverTracksFor(list: List<SavedPlaylist>): Map<String, Track> {
+        val existing = appRef.repository.cachedTracks()
+        val byFileName = existing.associateBy { it.fileName }
+        val byTitle = existing.groupBy {
+            TrackMatcher.norm(TrackMatcher.stripBrackets(it.title))
+        }
+        val out = mutableMapOf<String, Track>()
+        for (pl in list) {
+            val songs = store.tracks(pl.key).take(8)
+            val first = songs.firstOrNull() ?: continue
+            val matched = songs.firstNotNullOfOrNull { t ->
+                t.note.takeIf { it.isNotBlank() }?.let { byFileName[it] }
+                    ?: byTitle[TrackMatcher.norm(TrackMatcher.stripBrackets(t.title))]
+                        ?.firstOrNull { TrackMatcher.artistHit(t.artist, it.artist) }
+            }
+            out[pl.key] = coverTrackFor(first, matched)
+        }
+        return out
     }
 
     /** 删掉一张歌单。网盘里已经导进去的歌不动。 */

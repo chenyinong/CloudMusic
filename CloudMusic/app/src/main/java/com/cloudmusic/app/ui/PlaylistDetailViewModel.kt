@@ -84,6 +84,10 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
     var libraryTracks by mutableStateOf<Map<String, Track>>(emptyMap())
         private set
 
+    /** 顶部大封面：借用歌单里某首歌的封面，和列表页是同一张 */
+    var coverTrack by mutableStateOf<Track?>(null)
+        private set
+
     /** 播放器（全局单例） */
     val player get() = appRef.player
 
@@ -230,6 +234,7 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
             tracks = list
             // 保留之前手工挂上去的（曲库索引还没同步上的）
             libraryTracks = matched + libraryTracks.filterKeys { it !in matched }
+            coverTrack = pickCoverTrack(list, libraryTracks)
             inLibrary = libraryTracks.keys + list.filter { it.state == TrackState.IMPORTED }.map { it.key }
             loading = false
 
@@ -279,8 +284,19 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
             tracks = list
             // 刚上传的文件还没进曲库索引，别把手工挂上去的那条冲掉
             libraryTracks = matched + libraryTracks.filterKeys { it !in matched }
+            coverTrack = pickCoverTrack(list, libraryTracks)
             inLibrary = libraryTracks.keys + list.filter { it.state == TrackState.IMPORTED }.map { it.key }
         }
+    }
+
+    /** 前几首里挑第一首能对上网盘文件的；一首都对不上就用第一首走在线检索。 */
+    private fun pickCoverTrack(
+        list: List<SavedTrack>,
+        matched: Map<String, Track>,
+    ): Track? {
+        val first = list.firstOrNull() ?: return null
+        val hit = list.take(8).firstNotNullOfOrNull { matched[it.key] }
+        return coverTrackFor(first, hit)
     }
 
     /**
