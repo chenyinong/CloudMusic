@@ -138,6 +138,13 @@ fun PlayerScreen(
             moreFrom = 0
             showDlna = true
         }
+        AppMenuItem(
+            text = "定时关闭",
+            icon = Icons.Filled.Schedule
+        ) {
+            moreFrom = 0
+            showSleep = true
+        }
     }
 
     // 唱片页 / 歌词页，左右滑动切换（跟 QQ 音乐一样横向翻）
@@ -516,8 +523,6 @@ fun PlayerScreen(
                 onNext = { if (casting != null) dlnaVm.nextCast() else conn.next() },
                 onCycleRepeat = { conn.cycleRepeatMode() },
                 onShowQueue = { showQueue = true },
-                sleepMode = conn.sleepMode,
-                onSleep = { showSleep = true },
                 modifier = Modifier.fillMaxWidth()
             )
 
