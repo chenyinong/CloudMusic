@@ -51,6 +51,7 @@ class Prefs(context: Context) {
         private const val KEY_IMPORTED = "imported_tracks"
         private const val KEY_DAV_ROOT_WRITABLE = "dav_root_writable"
         private const val KEY_THEME_FOLLOW = "theme_follow_system"
+        private const val KEY_TAGS_FIX_V1 = "tags_fix_v1"
     }
 
     private val appContext = context.applicationContext
@@ -100,6 +101,11 @@ class Prefs(context: Context) {
     var themeFollowSystem: Boolean
         get() = sp.getBoolean(KEY_THEME_FOLLOW, false)
         set(v) = sp.edit().putBoolean(KEY_THEME_FOLLOW, v).apply()
+
+    /** 历史曲库「歌名/歌手反了」的一次性纠正是否已跑过 */
+    var tagsFixV1Done: Boolean
+        get() = sp.getBoolean(KEY_TAGS_FIX_V1, false)
+        set(v) = sp.edit().putBoolean(KEY_TAGS_FIX_V1, v).apply()
 
     val credentials: DavCredentials
         get() = DavCredentials(serverUrl, account, appPassword)

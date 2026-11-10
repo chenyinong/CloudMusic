@@ -1,6 +1,7 @@
 package com.cloudmusic.app.ui
 
 import android.app.Application
+import android.net.Uri
 import android.webkit.CookieManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -8,6 +9,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.cloudmusic.app.App
+import com.cloudmusic.app.data.AudioTagsReader
 import com.cloudmusic.app.data.AuthFailedException
 import com.cloudmusic.app.data.CloudProvider
 import com.cloudmusic.app.data.DavCredentials
@@ -142,6 +144,75 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             if (player.currentTrack?.key == id) coverUrl = url
             coverLoadingId = null
         }
+    }
+
+    /** 手动填一个封面图片 URL。 */
+    fun setCoverUrl(track: Track, url: String) {
+        val trimmed = url.trim()
+        if (!trimmed.startsWith("http")) return
+        appRef.coverRepository.setManualCover(track.key, trimmed)
+        applyManualCover(track, trimmed)
+    }
+
+    /** 手动从相册选一张图：复制进 App 私有目录再入库，图库里删了也不影响。 */
+    fun setCoverImage(track: Track, uri: Uri) {
+        viewModelScope.launch {
+            val url = withContext(Dispatchers.IO) {
+                val bytes = try {
+                    appRef.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                } catch (e: Exception) {
+                    null
+                } ?: return@withContext null
+                appRef.coverRepository.setManualCoverFromBytes(track.key, bytes)
+            } ?: return@launch
+            applyManualCover(track, url)
+        }
+    }
+
+    /** 重新自动查找封面：清掉所有缓存再走一遍来源链。 */
+    fun refreshCover(track: Track) {
+        appRef.coverRepository.resetCover(track.key)
+        coverCache.remove(track.key)
+        coverJob?.cancel()
+        coverLoadingId = null
+        if (player.currentTrack?.key == track.key) coverUrl = null
+        loadCover(track)
+    }
+
+    /** 单首：优先用内嵌标签纠正，读不到就按曲库歌手频次交换，顺带让封面重查。 */
+    fun correctTrackTags(track: Track) {
+        viewModelScope.launch {
+            val fixed = withContext(Dispatchers.IO) {
+                val freq = appRef.repository.cachedTracks()
+                    .map { it.artist.trim() }
+                    .filter { it.isNotBlank() }
+                    .groupingBy { it }
+                    .eachCount()
+                // OneDrive 的 Range 读取不稳，别在这儿白等超时
+                val byTags = if (track.provider == ProviderKind.WEBDAV.id) {
+                    val head = appRef.coverRepository.audioHead(track, 256 * 1024)
+                    val tags = head?.let { AudioTagsReader.read(it) }
+                    tags?.let { AudioTagsReader.correct(track, it) }
+                } else null
+                byTags ?: AudioTagsReader.swapIfReversed(track, freq)
+            }
+            android.util.Log.d("CMDIAG", "correctTrackTags fixed=$fixed file=${track.fileName}")
+            if (fixed == null) {
+                _status.value = "《${track.title}》没能识别出歌名/歌手顺序，保持原样"
+                return@launch
+            }
+            withContext(Dispatchers.IO) {
+                appRef.repository.upsertTrack(fixed)
+                appRef.coverRepository.resetCover(track.key)
+            }
+            refreshTracks()
+            _status.value = "已修正《${fixed.title}》· ${fixed.artist}，封面会重新查找"
+        }
+    }
+
+    private fun applyManualCover(track: Track, url: String) {
+        coverCache[track.key] = url
+        if (player.currentTrack?.key == track.key) coverUrl = url
     }
 
     var loggedIn by mutableStateOf(false)
@@ -466,6 +537,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
         _tracks.value = repo.cachedTracks()
         screen = if (loggedIn) Screen.LIBRARY else Screen.LOGIN
+
+        // 历史索引里「歌名-歌手.flac」被老解析规则存反了，一次性纠正。
+        // 只做一次、纯本地统计，不联网；修完让封面按正确歌名重新查。
+        if (!prefs.tagsFixV1Done) {
+            viewModelScope.launch(Dispatchers.IO) {
+                val fixed = runCatching { repo.fixReversedTags() }.getOrDefault(emptyList())
+                prefs.tagsFixV1Done = true
+                if (fixed.isEmpty()) return@launch
+                coverCache.clear()
+                appRef.coverRepository.invalidateAll()
+                refreshTracks()
+                _status.value = "已自动修正 ${fixed.size} 首歌的歌名/歌手，封面会重新查找"
+            }
+        }
 
         // 上次登录时昵称没拉到（网络抖了一下，或者 /me 当时没成功），
         // 设置页就会一直显示「账号：已连接」，看不出是谁的盘。
@@ -806,6 +891,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             errors.addAll(outcome.errors.map { "${kind.label} · $it" })
         }
+        // 扫描时可能用内嵌标签纠正了歌名/歌手，封面缓存跟着失效重查
+        appRef.coverRepository.invalidateAll()
         refreshTracks()
         _status.value = if (errors.isEmpty()) {
             "扫描完成，共 ${_tracks.value.size} 首" + providerSuffix(providers)
@@ -826,6 +913,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             davUsedBytes = outcome.usedBytes
             prefs.davUsedBytes = outcome.usedBytes
         }
+        appRef.coverRepository.invalidateAll()
         refreshTracks()
         val errors = outcome.errors
         _status.value = if (errors.isEmpty()) {

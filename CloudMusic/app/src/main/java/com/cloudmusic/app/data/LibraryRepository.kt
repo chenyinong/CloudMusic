@@ -1,6 +1,11 @@
 package com.cloudmusic.app.data
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
@@ -50,6 +55,16 @@ interface CloudProvider {
 
     /** 读取一个小文件的内容（歌词文件），失败返回 null */
     suspend fun fetchText(entryId: String): String?
+
+    /**
+     * 读取文件字节（同目录封面图 / 音频头部）。
+     * 默认返回 null —— 不支持二进制读取的网盘自动退化成占位图，不影响播放。
+     */
+    suspend fun fetchBytes(
+        entryId: String,
+        range: String? = null,
+        maxBytes: Int = 512 * 1024,
+    ): ByteArray? = null
 
     /** 播放地址 */
     fun playUrl(entryId: String): String
@@ -106,9 +121,86 @@ class LibraryRepository(
     ): ScanOutcome = withContext(Dispatchers.IO) {
         val result = provider.scan(onProgress)
         val tracks = result.audio.map { it.toTrack(provider.playUrl(it.href), provider.kind.id) }
-        db.replaceAll(tracks, provider.kind.id)
+        // 文件名解析只认「歌手 - 歌名」，遇到「歌名 - 歌手」就会反过来。
+        // 有内嵌标签的话以标签为准纠正一遍，顺带把封面缓存清掉让它重查。
+        val corrected = correctFromTags(tracks, provider)
+        db.replaceAll(corrected, provider.kind.id)
         db.replaceLyricFiles(result.lyricFiles.map { it.toLyricFileRef(provider.kind.id) }, provider.kind.id)
-        ScanOutcome(tracks, result.errors, result.usedBytes)
+        db.replaceCoverFiles(result.coverFiles.map { it.toCoverFileRef(provider.kind.id) }, provider.kind.id)
+        ScanOutcome(corrected, result.errors, result.usedBytes)
+    }
+
+    /**
+     * 用文件内嵌标签纠正曲库索引里的歌名/歌手。
+     *
+     * 只挑文件名带 '-' 的曲目：不带 '-' 的文件名整段就是歌名，不存在「反了」的问题，
+     * 全盘几百首都去读 256KB 文件头会把同步拖得很慢。最多 4 个并发，
+     * 读不到/标签不可信就原样保留，绝不影响正常入库。
+     */
+    private suspend fun correctFromTags(
+        tracks: List<Track>,
+        provider: CloudProvider,
+    ): List<Track> = coroutineScope {
+        val targets = tracks.filter { it.fileName.contains('-') && it.id.isNotBlank() }
+        if (targets.isEmpty()) return@coroutineScope tracks
+
+        val semaphore = Semaphore(4)
+        // 曲库里谁当过歌手、当过几次 —— 用来判断「歌名-歌手」被解析反的情况
+        val artistFreq = tracks.map { it.artist.trim() }
+            .filter { it.isNotBlank() }
+            .groupingBy { it }
+            .eachCount()
+        val fixes = targets.map { t ->
+            async(Dispatchers.IO) {
+                semaphore.withPermit {
+                    // OneDrive 的 /content Range 不稳定，直接用曲库统计判断，别白等超时
+                    val fixed = if (t.provider == ProviderKind.WEBDAV.id) {
+                        val head = try {
+                            provider.fetchBytes(t.id, "bytes=0-262143", 256 * 1024)
+                        } catch (e: Exception) {
+                            null
+                        }
+                        val tags = head?.let { AudioTagsReader.read(it) }
+                        val byTags = tags?.let { AudioTagsReader.correct(t, it) }
+                        byTags ?: AudioTagsReader.swapIfReversed(t, artistFreq)
+                    } else {
+                        AudioTagsReader.swapIfReversed(t, artistFreq)
+                    } ?: return@withPermit null
+                    t.key to fixed
+                }
+            }
+        }.awaitAll().filterNotNull().toMap()
+
+        if (fixes.isEmpty()) return@coroutineScope tracks
+        // 歌名/歌手变了，之前按旧字段查的封面（或负缓存）都作废
+        fixes.keys.forEach { db.clearCover(it) }
+        tracks.map { fixes[it.key] ?: it }
+    }
+
+    /**
+     * 历史索引的一次性纠正：老版本只按「歌手 - 歌名」拆文件名，
+     * 碰到「搁浅-周杰伦.flac」会存成 title=周杰伦 / artist=搁浅。
+     *
+     * 这里只用整张曲库的歌手频次判定，不联网、不读音频头，几十条记录几毫秒跑完；
+     * 修好的写回索引并清掉按旧字段查出来的封面缓存。
+     * 幂等：交换后歌名不再出现在别人的 artist 里，下次启动不会再动它。
+     */
+    fun fixReversedTags(): List<Track> {
+        val tracks = db.all()
+        if (tracks.isEmpty()) return emptyList()
+        val artistFreq = tracks.map { it.artist.trim() }
+            .filter { it.isNotBlank() }
+            .groupingBy { it }
+            .eachCount()
+        val fixed = tracks.mapNotNull { t ->
+            if (!t.fileName.contains('-')) return@mapNotNull null
+            AudioTagsReader.swapIfReversed(t, artistFreq)
+        }
+        fixed.forEach {
+            db.upsert(it)
+            db.clearCover(it.key)
+        }
+        return fixed
     }
 
     /** 全部网盘的曲目 */
@@ -176,6 +268,19 @@ fun DavEntry.toLyricFileRef(providerId: String = ProviderKind.WEBDAV.id): LyricF
     return LyricFileRef(
         folder = decodePath(parent),
         base = decodePath(base),
+        href = href
+    )
+}
+
+/** 把网盘里的封面图片转成索引项：目录 + 文件名（不含扩展名）。 */
+fun DavEntry.toCoverFileRef(providerId: String = ProviderKind.WEBDAV.id): CoverFileRef {
+    val oneDrive = providerId == ProviderKind.ONEDRIVE.id
+    val parent = if (oneDrive) parentPath
+    else href.trimEnd('/').substringBeforeLast('/', "")
+    val fileName = if (oneDrive) name else DavXmlParser.nameFromHref(href)
+    return CoverFileRef(
+        folder = decodePath(parent),
+        base = decodePath(fileName.substringBeforeLast('.')),
         href = href
     )
 }

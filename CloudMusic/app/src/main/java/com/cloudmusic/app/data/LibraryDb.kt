@@ -12,6 +12,9 @@ data class LyricsRow(val lrc: String, val source: String)
 /** 网盘里的一个歌词文件，key = 目录 + 文件名（不含扩展名）。 */
 data class LyricFileRef(val folder: String, val base: String, val href: String)
 
+/** 网盘里的一个封面图片文件，索引口径与歌词文件一致。 */
+data class CoverFileRef(val folder: String, val base: String, val href: String)
+
 /**
  * 本地曲库索引。使用原生 SQLite，避免引入注解处理器。
  */
@@ -23,8 +26,11 @@ class LibraryDb(context: Context) :
         const val TABLE_LYRICS = "lyrics"
         const val TABLE_LYRIC_FILES = "lyric_files"
 
-        /** 专辑封面直链缓存（key = 曲目 key，url = iTunes 图 URL） */
+        /** 专辑封面直链缓存（key = 曲目 key，url = 在线图 URL 或 local: 本地文件） */
         const val TABLE_COVERS = "covers"
+
+        /** 网盘里的封面图片文件索引（key = 目录 + 文件名） */
+        const val TABLE_COVER_FILES = "cover_files"
 
         /** 存下来的歌单（只存清单，歌曲在网盘里） */
         const val TABLE_PLAYLISTS = "playlists"
@@ -32,7 +38,7 @@ class LibraryDb(context: Context) :
         /** 歌单里的每一首歌 */
         const val TABLE_PLAYLIST_TRACKS = "playlist_tracks"
 
-        const val VERSION = 7
+        const val VERSION = 8
 
         fun lyricKey(providerId: String, folder: String, base: String): String =
             "$providerId|${folder.lowercase()}|${base.lowercase()}"
@@ -60,6 +66,7 @@ class LibraryDb(context: Context) :
         createLyricsTables(db)
         createPlaylistTables(db)
         createCoverTable(db)
+        createCoverFilesTable(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -107,6 +114,7 @@ class LibraryDb(context: Context) :
         }
         if (oldVersion < 6) createPlaylistTables(db)
         if (oldVersion < 7) createCoverTable(db)
+        if (oldVersion < 8) createCoverFilesTable(db)
     }
 
     /**
@@ -251,6 +259,7 @@ class LibraryDb(context: Context) :
     fun deleteProvider(providerId: String) {
         writableDatabase.delete(TABLE, "provider = ?", arrayOf(providerId))
         writableDatabase.delete(TABLE_LYRIC_FILES, "provider = ?", arrayOf(providerId))
+        writableDatabase.delete(TABLE_COVER_FILES, "provider = ?", arrayOf(providerId))
     }
 
     /**
@@ -263,6 +272,68 @@ class LibraryDb(context: Context) :
     }
 
     // ---------- 封面 ----------
+
+    private fun createCoverFilesTable(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS $TABLE_COVER_FILES (
+                key TEXT PRIMARY KEY, provider TEXT NOT NULL DEFAULT 'webdav',
+                folder TEXT NOT NULL DEFAULT '', base TEXT NOT NULL DEFAULT '',
+                href TEXT NOT NULL DEFAULT '')
+            """.trimIndent()
+        )
+    }
+
+    /** 扫描后重建封面图片索引，播放时直接查表，不用再遍历网盘。 */
+    fun replaceCoverFiles(files: List<CoverFileRef>, providerId: String) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete(TABLE_COVER_FILES, "provider = ?", arrayOf(providerId))
+            for (f in files) {
+                val cv = ContentValues().apply {
+                    put("key", lyricKey(providerId, f.folder, f.base))
+                    put("provider", providerId)
+                    put("folder", f.folder)
+                    put("base", f.base)
+                    put("href", f.href)
+                }
+                db.insertWithOnConflict(
+                    TABLE_COVER_FILES, null, cv, SQLiteDatabase.CONFLICT_REPLACE
+                )
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    /** 找同目录下指定名字（不含扩展名）的封面图，返回网盘 href。 */
+    fun coverFile(providerId: String, folder: String, base: String): String? {
+        readableDatabase.rawQuery(
+            "SELECT href FROM $TABLE_COVER_FILES WHERE key = ?",
+            arrayOf(lyricKey(providerId, folder, base))
+        ).use { c ->
+            if (!c.moveToFirst()) return null
+            return c.getString(0)
+        }
+    }
+
+    /** 同目录下所有封面图的 href（找不到同名/通用名时的兜底）。 */
+    fun coverFilesInFolder(providerId: String, folder: String): List<String> {
+        val out = mutableListOf<String>()
+        readableDatabase.rawQuery(
+            "SELECT href FROM $TABLE_COVER_FILES WHERE provider = ? AND folder = ?",
+            arrayOf(providerId, folder)
+        ).use { c ->
+            while (c.moveToNext()) out.add(c.getString(0))
+        }
+        return out
+    }
+
+    fun clearCover(trackId: String) {
+        writableDatabase.delete(TABLE_COVERS, "trackId = ?", arrayOf(trackId))
+    }
 
     private fun createCoverTable(db: SQLiteDatabase) {
         db.execSQL(

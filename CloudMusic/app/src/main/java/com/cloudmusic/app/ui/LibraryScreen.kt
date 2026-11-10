@@ -1,5 +1,7 @@
 package com.cloudmusic.app.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -23,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
@@ -39,6 +42,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -96,6 +100,8 @@ fun LibraryScreen(
 
     // 「歌曲信息」弹窗要哪首
     var infoTrack by remember { mutableStateOf<Track?>(null) }
+    // 「设置封面」弹窗要哪首
+    var coverTrack by remember { mutableStateOf<Track?>(null) }
     // 待确认删除的曲目。删的是网盘里的文件，删了就没了，先问一句。
     var pendingDelete by remember { mutableStateOf<Track?>(null) }
 
@@ -310,7 +316,10 @@ fun LibraryScreen(
                             vm.player.play(filtered, filtered.indexOf(track))
                         },
                         onEnqueue = { vm.player.enqueue(track) },
-                        onShowInfo = { infoTrack = track }
+                        onShowInfo = { infoTrack = track },
+                        onSetCover = { coverTrack = track },
+                        onRefreshCover = { vm.refreshCover(track) },
+                        onCorrectTags = { vm.correctTrackTags(track) }
                     )
                 }
                 // 底部留白由 Root 统一处理（迷你播放器 + 导航栏）
@@ -327,6 +336,15 @@ fun LibraryScreen(
                 infoTrack = null
                 pendingDelete = t
             }
+        )
+    }
+
+    // 手动指定封面：填 URL 或从相册选图；也能清掉缓存重新自动查找
+    coverTrack?.let { t ->
+        CoverEditDialog(
+            track = t,
+            vm = vm,
+            onDismiss = { coverTrack = null }
         )
     }
 
@@ -458,6 +476,9 @@ private fun TrackRow(
     onClick: () -> Unit,
     onEnqueue: () -> Unit,
     onShowInfo: () -> Unit,
+    onSetCover: () -> Unit,
+    onRefreshCover: () -> Unit,
+    onCorrectTags: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     // 第二行只放歌手；挂了多个网盘时补个来源标签
@@ -517,7 +538,90 @@ private fun TrackRow(
                     menuOpen = false
                     onShowInfo()
                 }
+                AppMenuItem(
+                    text = "设置封面",
+                    icon = Icons.Filled.Image
+                ) {
+                    menuOpen = false
+                    onSetCover()
+                }
+                AppMenuItem(
+                    text = "重新查找封面",
+                    icon = Icons.Filled.Refresh
+                ) {
+                    menuOpen = false
+                    onRefreshCover()
+                }
+                AppMenuItem(
+                    text = "用文件标签修正歌名/歌手",
+                    icon = Icons.Filled.GraphicEq
+                ) {
+                    menuOpen = false
+                    onCorrectTags()
+                }
             }
         }
     }
+}
+
+/** 手动指定封面的对话框：填 URL / 选本地图 / 重新自动查找。 */
+@Composable
+private fun CoverEditDialog(
+    track: Track,
+    vm: AppViewModel,
+    onDismiss: () -> Unit,
+) {
+    var urlText by remember { mutableStateOf("") }
+    // 选完图直接保存并关掉弹窗；图片会被复制进 App 私有目录
+    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) vm.setCoverImage(track, uri)
+        onDismiss()
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        title = { Text("设置封面") },
+        text = {
+            Column {
+                Text(
+                    "《${track.title}》",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = urlText,
+                    onValueChange = { urlText = it },
+                    label = { Text("封面图片 URL") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = { pickImage.launch("image/*") }) {
+                    Text("从相册选一张图")
+                }
+                Text(
+                    "手动指定的封面优先于自动查找，会一直留着，直到你点「重新查找封面」。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                if (urlText.isNotBlank()) vm.setCoverUrl(track, urlText)
+                onDismiss()
+            }) { Text("保存") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = {
+                    vm.refreshCover(track)
+                    onDismiss()
+                }) { Text("重新查找") }
+                TextButton(onClick = onDismiss) { Text("取消") }
+            }
+        }
+    )
 }

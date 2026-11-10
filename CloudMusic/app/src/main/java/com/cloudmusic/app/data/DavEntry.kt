@@ -26,6 +26,9 @@ object AudioTypes {
     /** 歌词文件候选扩展名 */
     val LYRIC_EXTENSIONS = setOf("lrc", "txt")
 
+    /** 专辑封面图片候选扩展名（扫描时收进 cover_files 索引） */
+    val COVER_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp", "bmp")
+
     fun extensionOf(name: String): String {
         val dot = name.lastIndexOf('.')
         if (dot < 0 || dot == name.length - 1) return ""
@@ -42,6 +45,13 @@ object AudioTypes {
     fun isLyricFile(entry: DavEntry): Boolean {
         if (entry.isDirectory) return false
         return extensionOf(entry.name) in LYRIC_EXTENSIONS
+    }
+
+    /** 是否可能是同目录的专辑封面图（cover.jpg / folder.png / 与歌曲同名的图） */
+    fun isCoverFile(entry: DavEntry): Boolean {
+        if (entry.isDirectory) return false
+        if (entry.contentType.startsWith("image/", ignoreCase = true)) return true
+        return extensionOf(entry.name) in COVER_EXTENSIONS
     }
 
     /**

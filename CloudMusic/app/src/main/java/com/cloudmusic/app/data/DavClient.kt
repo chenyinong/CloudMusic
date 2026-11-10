@@ -49,6 +49,8 @@ data class DavQuota(
 data class ScanResult(
     val audio: List<DavEntry> = emptyList(),
     val lyricFiles: List<DavEntry> = emptyList(),
+    /** 同目录的封面图片文件（cover.jpg / folder.png 等） */
+    val coverFiles: List<DavEntry> = emptyList(),
     /** 读取失败的目录，用于在界面上告诉用户"哪里没扫到" */
     val errors: List<String> = emptyList(),
     /**
@@ -69,6 +71,11 @@ class DavClient(
     private val creds: DavCredentials,
     private val http: OkHttpClient,
 ) {
+
+    /** 读文件头专用：短超时，别让一个卡住的请求堵住封面/标签链路 */
+    private val rangedHttp: OkHttpClient by lazy {
+        http.newBuilder().callTimeout(8, java.util.concurrent.TimeUnit.SECONDS).build()
+    }
 
     companion object {
         const val USER_AGENT = "CloudMusic/1.0 (Android)"
@@ -345,6 +352,49 @@ class DavClient(
     }
 
     /**
+     * 读取文件字节（封面小图 / 音频头部），可带 [range]（如 "bytes=0-262143"）。
+     * 有些服务器不理 Range 直接回整首歌，所以最多只读 [maxBytes]，绝不下整文件。
+     */
+    suspend fun fetchBytes(
+        href: String,
+        range: String? = null,
+        maxBytes: Int = 512 * 1024,
+    ): ByteArray? = withContext(Dispatchers.IO) {
+        val builder = Request.Builder()
+            .url(urlFor(href))
+            .header("Authorization", creds.authorization)
+            .header("User-Agent", USER_AGENT)
+        if (range != null) builder.header("Range", range)
+        try {
+            rangedHttp.newCall(builder.build()).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    android.util.Log.d("CMDIAG", "DAV fetchBytes FAIL ${resp.code} range=$range href=$href")
+                    return@withContext null
+                }
+                android.util.Log.d(
+                    "CMDIAG",
+                    "DAV fetchBytes OK ${resp.code} len=${resp.body?.contentLength()} range=$range href=$href"
+                )
+                val stream = resp.body?.byteStream() ?: return@withContext null
+                stream.use { s ->
+                    val out = java.io.ByteArrayOutputStream()
+                    val buf = ByteArray(16 * 1024)
+                    var total = 0
+                    while (total < maxBytes) {
+                        val n = s.read(buf, 0, minOf(buf.size, maxBytes - total))
+                        if (n <= 0) break
+                        out.write(buf, 0, n)
+                        total += n
+                    }
+                    out.toByteArray().takeIf { it.isNotEmpty() }
+                }
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
      * 递归扫描整棵树，收集音频文件与歌词文件。
      * 读失败的目录不会中断扫描，但会记进 errors 里提示用户。
      */
@@ -354,6 +404,7 @@ class DavClient(
     ): ScanResult = withContext(Dispatchers.IO) {
         val audio = mutableListOf<DavEntry>()
         val lyricFiles = mutableListOf<DavEntry>()
+        val coverFiles = mutableListOf<DavEntry>()
         val errors = mutableListOf<String>()
         // 占用空间的是所有文件，不只是能被播放器认出来的那些
         var usedBytes = 0L
@@ -383,10 +434,17 @@ class DavClient(
                     usedBytes += e.size
                     if (AudioTypes.isAudio(e)) audio.add(e)
                     else if (AudioTypes.isLyricFile(e)) lyricFiles.add(e)
+                    else if (AudioTypes.isCoverFile(e)) coverFiles.add(e)
                 }
             }
         }
-        ScanResult(audio, lyricFiles, errors, usedBytes)
+        ScanResult(
+            audio = audio,
+            lyricFiles = lyricFiles,
+            coverFiles = coverFiles,
+            errors = errors,
+            usedBytes = usedBytes
+        )
     }
 
     /** 从 Link 响应头里解析下一页地址。 */

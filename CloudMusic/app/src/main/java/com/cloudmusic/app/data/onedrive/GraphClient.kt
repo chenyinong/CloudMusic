@@ -54,6 +54,19 @@ class GraphClient(
     /** 上传（简单上传 + 大文件分块会话） */
     private val uploader = OneDriveUploader(http, prefs) { accessToken() }
 
+    /** 读文件头专用：短超时，卡住的网盘不能把整条封面来源链堵死 */
+    private val rangedHttp: OkHttpClient by lazy {
+        http.newBuilder().callTimeout(8, java.util.concurrent.TimeUnit.SECONDS).build()
+    }
+
+    /** 只用来拿 302 的 Location，不自动跟随（预签名直链要用干净请求取） */
+    private val noRedirectHttp: OkHttpClient by lazy {
+        http.newBuilder()
+            .followRedirects(false)
+            .callTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
+
 
     companion object {
         const val GRAPH = "https://graph.microsoft.com/v1.0"
@@ -196,6 +209,63 @@ class GraphClient(
                 decodeText(bytes)
             }
         } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 下载文件字节（封面小图 / 音频头部），可带 [range]。
+     * Graph 的 /content 会 302 到预签名直链，OkHttp 跟随时会保留 Range。
+     * 最多读 [maxBytes]，服务器忽略 Range 直接回整首歌也不会把内存撑爆。
+     */
+    suspend fun downloadBytes(
+        itemId: String,
+        range: String? = null,
+        maxBytes: Int = 512 * 1024,
+    ): ByteArray? = withContext(Dispatchers.IO) {
+        val token = accessToken() ?: return@withContext null
+        android.util.Log.d("CMDIAG", "GRAPH downloadBytes start item=$itemId range=$range")
+        val probeReq = Request.Builder()
+            .url("$GRAPH/me/drive/items/$itemId/content")
+            .header("Authorization", "Bearer $token")
+        if (range != null) probeReq.header("Range", range)
+        try {
+            // /content 会 302 到预签名直链。之前让 OkHttp 自动跟随 + Range 会挂住，
+            // 这里改成自己拿 Location，再用「不带 Authorization」的干净请求去取字节。
+            val probe = noRedirectHttp.newCall(probeReq.build()).execute()
+            android.util.Log.d(
+                "CMDIAG",
+                "GRAPH probe ${probe.code} loc=${probe.header("Location")?.take(70)}"
+            )
+            val resp = if (probe.isRedirect && probe.header("Location") != null) {
+                val loc = probe.header("Location")!!
+                probe.close()
+                val direct = Request.Builder().url(loc)
+                if (range != null) direct.header("Range", range)
+                rangedHttp.newCall(direct.build()).execute()
+            } else probe
+            resp.use { r ->
+                android.util.Log.d(
+                    "CMDIAG",
+                    "GRAPH final ${r.code} len=${r.body?.contentLength()} url=${r.request.url.toString().take(70)}"
+                )
+                if (!r.isSuccessful) return@withContext null
+                val stream = r.body?.byteStream() ?: return@withContext null
+                stream.use { s ->
+                    val out = java.io.ByteArrayOutputStream()
+                    val buf = ByteArray(16 * 1024)
+                    var total = 0
+                    while (total < maxBytes) {
+                        val n = s.read(buf, 0, minOf(buf.size, maxBytes - total))
+                        if (n <= 0) break
+                        out.write(buf, 0, n)
+                        total += n
+                    }
+                    out.toByteArray().takeIf { it.isNotEmpty() }
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.d("CMDIAG", "GRAPH ERROR ${e.javaClass.simpleName}: ${e.message}")
             null
         }
     }

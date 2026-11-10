@@ -16,6 +16,12 @@ class DavProvider(
 
     override suspend fun fetchText(entryId: String): String? = client.fetchText(entryId)
 
+    override suspend fun fetchBytes(
+        entryId: String,
+        range: String?,
+        maxBytes: Int,
+    ): ByteArray? = client.fetchBytes(entryId, range, maxBytes)
+
     override fun playUrl(entryId: String): String = client.urlFor(entryId).toString()
 
     override fun isReady(): Boolean = true

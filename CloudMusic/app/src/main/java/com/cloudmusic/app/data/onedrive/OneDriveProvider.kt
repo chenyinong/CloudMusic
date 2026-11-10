@@ -31,6 +31,7 @@ class OneDriveProvider(
     ): ScanResult {
         val audio = mutableListOf<DavEntry>()
         val lyricFiles = mutableListOf<DavEntry>()
+        val coverFiles = mutableListOf<DavEntry>()
         val errors = mutableListOf<String>()
         // 队列里放 (文件夹 id，文件夹名字)，根目录用空 id
         val queue = ArrayDeque<Pair<String, String>>()
@@ -57,13 +58,26 @@ class OneDriveProvider(
                     audio.add(e)
                 } else if (AudioTypes.isLyricFile(e)) {
                     lyricFiles.add(e)
+                } else if (AudioTypes.isCoverFile(e)) {
+                    coverFiles.add(e)
                 }
             }
         }
-        return ScanResult(audio, lyricFiles, errors)
+        return ScanResult(
+            audio = audio,
+            lyricFiles = lyricFiles,
+            coverFiles = coverFiles,
+            errors = errors
+        )
     }
 
     override suspend fun fetchText(entryId: String): String? = graph.downloadText(entryId)
+
+    override suspend fun fetchBytes(
+        entryId: String,
+        range: String?,
+        maxBytes: Int,
+    ): ByteArray? = graph.downloadBytes(entryId, range, maxBytes)
 
     /** 懒加载单文件时长（毫秒），投屏断点续播用，拿不到返回 null */
     suspend fun fetchAudioDurationMs(itemId: String): Long? = graph.itemAudioDurationMs(itemId)

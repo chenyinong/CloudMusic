@@ -79,8 +79,8 @@ class App : Application() {
         liumingye = LiumingyeSource(repository.http)
         // 歌词的兜底源是下歌吧（QQ 音乐搜不到的冷门歌它有）
         lyricsRepository = LyricsRepository(prefs, db, repository.http, oneDriveProvider, liumingye)
-        // 封面走 iTunes Search API（免费无 Key），SQLite 里存直链
-        coverRepository = CoverRepository(db, repository.http)
+        // 封面来源链：同目录图 → 内嵌图 → QQ 音乐 → 占位图
+        coverRepository = CoverRepository(db, repository.http, repository, oneDriveProvider, filesDir)
         quarkClient = QuarkClient(repository.http) { prefs.quarkCookie }
         // 网盘音源（下歌吧 → 夸克网盘）。网易云很多歌只有 30 秒试听，
         // 完整版得从网盘拿，所以在线搜歌和歌单导入都用它兜底。

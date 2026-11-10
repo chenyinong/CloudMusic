@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,8 +48,10 @@ fun CoverThumb(
     val app = LocalContext.current.applicationContext as? App
     val key = track?.key
     var bitmap by remember(key) { mutableStateOf<ImageBitmap?>(null) }
+    // 手动换封面 / 重新查找后，跟着 epoch 重新取一次（命中缓存，秒换）
+    val epoch = app?.coverRepository?.changes?.collectAsState()?.value ?: 0
 
-    LaunchedEffect(key, app) {
+    LaunchedEffect(key, app, epoch) {
         if (track == null || app == null) {
             bitmap = null
             return@LaunchedEffect
