@@ -53,6 +53,7 @@ fun CloudMusicRoot(vm: AppViewModel) {
     LaunchedEffect(currentTrack?.key, nextTrack?.key) {
         vm.loadLyrics(currentTrack)
         vm.prefetchLyrics(nextTrack)
+        vm.loadCover(currentTrack)
     }
 
     val conn = vm.player

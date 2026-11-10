@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>列表封面方案</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#1a1d24; color:#e8eaef; font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    padding:36px 24px 60px; display:flex; flex-direction:column; align-items:center; gap:26px; }
+  h1 { font-size:20px; font-weight:600; }
+  .phone { width:400px; height:866px; border-radius:34px; overflow:hidden; position:relative;
+    background:#f1f1f1; box-shadow:0 20px 60px rgba(0,0,0,.55); flex:none; }
+  .statusbar { height:38px; display:flex; align-items:center; justify-content:space-between; padding:0 22px; font-size:12.5px; font-weight:600; color:#111; }
+  .sb-right { display:flex; gap:5px; align-items:center; font-size:11px; }
+  .sig { display:inline-flex; gap:1.5px; align-items:flex-end; height:10px; }
+  .sig i { width:2.5px; background:#111; border-radius:1px; display:block; }
+  .bat { width:19px; height:10px; border:1.4px solid #111; border-radius:3px; position:relative; }
+  .bat::after { content:""; position:absolute; inset:1.4px; right:3px; background:#111; border-radius:1px; }
+  .bat::before { content:""; position:absolute; right:-3.4px; top:2.4px; width:2px; height:4px; background:#111; border-radius:0 2px 2px 0; }
+  .topbar { height:46px; display:flex; align-items:center; gap:12px; padding:0 18px; }
+  .topbar .back { width:22px; height:22px; color:#111; }
+  .topbar .ttl { font-size:15px; font-weight:600; color:#111; flex:1; }
+  .topbar .refresh { width:20px; height:20px; color:#7b858b; }
+  .hero { margin:4px 16px 10px; background:#fff; border-radius:16px; padding:13px 16px;
+    display:flex; align-items:center; justify-content:space-between; box-shadow:0 1px 4px rgba(0,0,0,.05); }
+  .hero .htitle { font-size:16px; font-weight:700; color:#111; }
+  .hero .hsub { font-size:11px; color:#9aa1a5; margin-top:3px; }
+  .hero .badge3 { font-size:11px; color:#0a8f84; background:#e3f4f1; border-radius:12px; padding:5px 11px; }
+  .search { margin:0 16px; height:40px; background:#e9ecec; border-radius:12px; display:flex; align-items:center;
+    gap:9px; padding:0 12px; color:#9aa4a9; font-size:13px; }
+  .search svg { width:17px; height:17px; flex:none; }
+  .controls { display:flex; align-items:center; gap:11px; padding:12px 18px 6px; }
+  .playall { width:34px; height:34px; border-radius:50%; background:#111; display:flex; align-items:center;
+    justify-content:center; flex:none; }
+  .playall svg { width:17px; height:17px; color:#fff; }
+  .controls .t1 { font-size:13.5px; font-weight:700; color:#111; }
+  .controls .t2 { font-size:10.5px; color:#9aa4a9; margin-top:1px; }
+  .sort { margin-left:auto; display:flex; align-items:center; gap:4px; font-size:11.5px; color:#7b858b;
+    background:#e6e9ea; border-radius:9px; padding:6px 10px; }
+  .sort svg { width:13px; height:13px; }
+  .chips { display:flex; gap:8px; padding:2px 16px 8px; }
+  .chip { font-size:11.5px; color:#7b858b; background:#e6e9ea; border-radius:9px; padding:5px 12px; }
+  .chip.on { background:#111; color:#fff; font-weight:600; }
+
+  .rows { padding:0 14px; }
+  .row { display:flex; align-items:center; gap:14px; padding:11px 8px; border-bottom:1px solid #e3e3e3; }
+  .cover { width:58px; height:58px; border-radius:12px; overflow:hidden; flex:none; position:relative; box-shadow:0 1px 4px rgba(0,0,0,.12); }
+  .cover svg { width:100%; height:100%; display:block; }
+  .meta { flex:1; min-width:0; }
+  .t { font-size:15.5px; font-weight:700; color:#111; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .t.playing { color:#0a8f84; }
+  .sub { font-size:12.5px; color:#8f9aa0; margin-top:3px; display:flex; align-items:center; gap:6px; }
+  .sub .dot { width:3px; height:3px; border-radius:50%; background:#c2c9cd; }
+  .badge { font-size:10px; font-weight:600; color:#8a959b; background:#e6e9ea; border-radius:6px; padding:3px 8px; flex:none; }
+  .more { width:30px; height:30px; flex:none; display:flex; align-items:center; justify-content:center; color:#aeb8bd; }
+  .more svg { width:18px; height:18px; }
+  /* 「更多」菜单：保留原三项 */
+  .row-menu { position:absolute; right:18px; top:322px; width:152px; background:#fff; border-radius:12px;
+    box-shadow:0 8px 28px rgba(0,0,0,.20); padding:6px 0; z-index:8; }
+  .row-menu .mh { font-size:11px; font-weight:700; color:#111; padding:7px 14px 8px; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis; }
+  .row-menu .md { height:1px; background:#ececec; margin:0 8px 4px; }
+  .row-menu .mi { display:flex; align-items:center; gap:9px; font-size:12.5px; color:#333; padding:8px 14px; }
+  .row-menu .mi svg { width:15px; height:15px; color:#7b858b; }
+  .heart { color:#e57373; }
+
+  /* 底部 TAB 栏（现状保留）：我的 / 歌单 / 搜歌 / 设置 */
+  .tabbar { position:absolute; left:10px; right:10px; bottom:8px; height:58px; background:rgba(255,255,255,.92);
+    border-radius:18px; display:flex; align-items:center; justify-content:space-around; z-index:6; }
+  .tab { display:flex; flex-direction:column; align-items:center; gap:3px; font-size:10.5px; color:#8b959b; width:60px; }
+  .tab svg { width:21px; height:21px; }
+  .tab.on { color:#0a8f84; font-weight:600; }
+
+  /* 迷你播放器：浮在 TAB 栏上面 */
+  .mini { position:absolute; left:12px; right:12px; bottom:76px; background:#fff; border-radius:24px;
+    box-shadow:0 10px 30px rgba(0,0,0,.14); display:flex; align-items:center; gap:12px; padding:10px 14px; z-index:7; }
+  .mini .cover.round { width:42px; height:42px; border-radius:50%; }
+  .mini .t { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .mini-ctrl { display:flex; align-items:center; gap:10px; color:#111; flex:none; }
+  .mini-ctrl > svg { width:22px; height:22px; }
+  .pp { width:34px; height:34px; border-radius:50%; background:#fff; color:#1b1b1b;
+    border:1px solid #d9dede; display:flex; align-items:center; justify-content:center; flex:none; }
+  .pp svg { width:17px; height:17px; }
+
+  .notes { max-width:900px; width:100%; }
+  .notes h2 { font-size:16px; margin-bottom:14px; }
+  .note-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; }
+  .note { background:#23272f; border:1px solid #2e333d; border-radius:12px; padding:14px 16px; font-size:13px; line-height:1.7; color:#c3c9d4; }
+  .note b { color:#8fd48f; font-weight:600; }
+</style>
+</head>
+<body>
+<h1>歌单列表 · 真实封面方案（布局不变，只换图）</h1>
+
+<div class="phone">
+  <div class="statusbar">
+    <span>18:39</span>
+    <span class="sb-right">
+      <span class="sig"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:10px"></i></span>
+      <span>23.0 KB/s</span><span class="bat"></span><span>6</span>
+    </span>
+  </div>
+  <!-- 顶栏：现状保留 -->
+  <div class="topbar">
+    <svg class="back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12H4M10 6l-6 6 6 6"/></svg>
+    <span class="ttl">曲库</span>
+    <svg class="refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 11a8 8 0 1 0-2 6M20 5v6h-6"/></svg>
+  </div>
+  <!-- 曲库头卡：现状保留 -->
+  <div class="hero">
+    <div>
+      <div class="htitle">我的音乐库</div>
+      <div class="hsub">69 首歌曲 · 2 个网盘 · 31 位歌手</div>
+    </div>
+    <span class="badge3">已同步</span>
+  </div>
+  <!-- 搜索框（吸顶）：现状保留，位置、样式一行不动 -->
+  <div class="search">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M16 16l5 5"/></svg>
+    <span>搜索歌曲 / 歌手 / 专辑</span>
+  </div>
+  <!-- 播放全部 + 排序：现状保留 -->
+  <div class="controls">
+    <div class="playall"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div>
+    <div>
+      <div class="t1">播放全部</div>
+      <div class="t2">69 首歌曲</div>
+    </div>
+    <div class="sort">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4l4 4H9v9H7V8H3l4-4zm10 16l-4-4h2V7h2v9h4l-4 4z"/></svg>
+      默认
+    </div>
+  </div>
+  <!-- 按网盘/来源筛选：现状保留 -->
+  <div class="chips">
+    <span class="chip on">全部</span>
+    <span class="chip">OneDrive</span>
+    <span class="chip">坚果云</span>
+    <span class="chip">夸克</span>
+  </div>
+
+  <div class="rows">
+    <!-- 行 1：真封面（苏打绿《秋：故事》） -->
+    <div class="row">
+      <div class="cover">
+        <svg viewBox="0 0 58 58" preserveAspectRatio="xMidYMid slice">
+          <rect width="58" height="58" fill="#8a9a6f"/>
+          <circle cx="38" cy="17" r="9" fill="#eee7b4" opacity=".95"/>
+          <path d="M0 58 L0 42 Q14 32 26 38 T58 40 L58 58 Z" fill="#5a7250"/>
+          <path d="M14 58 Q24 26 34 22 Q36 44 42 58 Z" fill="#6d8a5e"/>
+          <text x="29" y="55" font-size="7" fill="#fff" opacity=".85" text-anchor="middle" font-family="serif">秋：故事</text>
+        </svg>
+      </div>
+      <div class="meta">
+        <div class="t">我好想你（苏打绿版）</div>
+        <div class="sub"><span>苏打绿</span><span class="dot"></span><span>OneDrive</span></div>
+      </div>
+      <span class="badge">MP3</span>
+      <div class="more"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></div>
+    </div>
+
+    <!-- 行 2：真封面（陶喆《太平盛世》）· 正在播放 -->
+    <div class="row">
+      <div class="cover">
+        <svg viewBox="0 0 58 58" preserveAspectRatio="xMidYMid slice">
+          <rect width="58" height="58" fill="#c9b8d8"/>
+          <circle cx="20" cy="20" r="12" fill="#a48bbf"/>
+          <circle cx="20" cy="20" r="7" fill="#8a6aa8"/>
+          <path d="M0 58 Q20 38 58 46 L58 58 Z" fill="#b09cc4"/>
+          <text x="29" y="55" font-size="7" fill="#fff" opacity=".9" text-anchor="middle" font-family="serif">太平盛世</text>
+        </svg>
+      </div>
+      <div class="meta">
+        <div class="t playing">流沙 (Live)</div>
+        <div class="sub"><span>陶喆</span><span class="dot"></span><span>OneDrive</span><span class="dot"></span>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="#0a8f84"><path d="M8 5v14l11-7z"/></svg>
+        </div>
+      </div>
+      <span class="badge">FLAC</span>
+      <div class="more"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></div>
+    </div>
+
+    <!-- 行 3：真封面（王菲《寓言》） -->
+    <div class="row">
+      <div class="cover">
+        <svg viewBox="0 0 58 58" preserveAspectRatio="xMidYMid slice">
+          <rect width="58" height="58" fill="#e8d9b8"/>
+          <circle cx="29" cy="22" r="10" fill="#f2e39a"/>
+          <circle cx="29" cy="22" r="15" fill="#f2e39a" opacity=".25"/>
+          <path d="M0 58 L0 44 Q16 34 30 42 T58 44 L58 58 Z" fill="#7d8a5c"/>
+          <path d="M20 58 Q30 36 44 40 Q46 50 50 58 Z" fill="#93a06c"/>
+          <text x="29" y="55" font-size="7" fill="#fff" opacity=".85" text-anchor="middle" font-family="serif">寓言</text>
+        </svg>
+      </div>
+      <div class="meta">
+        <div class="t">百年孤寂</div>
+        <div class="sub"><span>王菲</span><span class="dot"></span><span>坚果云</span></div>
+      </div>
+      <span class="badge">FLAC</span>
+      <div class="more"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></div>
+    </div>
+
+    <!-- 行 4：iTunes 查不到 → 渐变占位图（现状样式） -->
+    <div class="row">
+      <div class="cover">
+        <svg viewBox="0 0 58 58" preserveAspectRatio="xMidYMid slice">
+          <defs><linearGradient id="g4" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#5b8def"/><stop offset="1" stop-color="#2c5fd8"/>
+          </linearGradient></defs>
+          <rect width="58" height="58" fill="url(#g4)"/>
+          <circle cx="29" cy="24" r="11" fill="#ffffff" opacity=".35"/>
+          <path d="M0 58 Q14 38 30 46 T58 48 L58 58 Z" fill="#ffffff" opacity=".22"/>
+        </svg>
+      </div>
+      <div class="meta">
+        <div class="t">1990 年夏的台风夜（现场版）</div>
+        <div class="sub"><span>不知名乐队</span><span class="dot"></span><span>夸克网盘</span></div>
+      </div>
+      <span class="badge">MP3</span>
+      <div class="more"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></div>
+    </div>
+
+    <!-- 行 5：还没轮到加载 → 占位图 -->
+    <div class="row">
+      <div class="cover">
+        <svg viewBox="0 0 58 58" preserveAspectRatio="xMidYMid slice">
+          <defs><linearGradient id="g5" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#ff8a65"/><stop offset="1" stop-color="#d84315"/>
+          </linearGradient></defs>
+          <rect width="58" height="58" fill="url(#g5)"/>
+          <circle cx="29" cy="24" r="11" fill="#ffffff" opacity=".35"/>
+          <path d="M0 58 Q14 38 30 46 T58 48 L58 58 Z" fill="#ffffff" opacity=".22"/>
+        </svg>
+      </div>
+      <div class="meta">
+        <div class="t">忽然之间</div>
+        <div class="sub"><span>莫文蔚</span><span class="dot"></span><span>OneDrive</span></div>
+      </div>
+      <span class="badge">APE</span>
+      <div class="more"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></div>
+    </div>
+  </div>
+
+  <!-- 「更多」菜单：⋮ 点开后仍是原来的三项（+ 的功能在这里） -->
+  <div class="row-menu">
+    <div class="mh">我好想你（苏打绿版）</div>
+    <div class="md"></div>
+    <div class="mi"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>播放</div>
+    <div class="mi"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 10H2v2h12v-2zm0-4H2v2h12V6zM2 16h8v-2H2v2zm18-8v6h-2v-4h-4V8h4V4h2v4h2v2h-2z"/></svg>加入播放队列</div>
+    <div class="mi"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>歌曲信息</div>
+  </div>
+
+  <!-- 迷你播放器：按真实结构 —— 圆形封面 / 歌名-歌手 / 暂停 / 下一首 / 播放列表 -->
+  <div class="mini">
+    <div class="cover round">
+      <svg viewBox="0 0 46 46" preserveAspectRatio="xMidYMid slice">
+        <rect width="46" height="46" fill="#c9b8d8"/>
+        <circle cx="16" cy="16" r="9" fill="#a48bbf"/>
+        <circle cx="16" cy="16" r="5.5" fill="#8a6aa8"/>
+        <path d="M0 46 Q15 30 46 37 L46 46 Z" fill="#b09cc4"/>
+      </svg>
+    </div>
+    <div class="meta">
+      <div class="t" style="font-size:14px">流沙 (Live) - 陶喆</div>
+    </div>
+    <div class="mini-ctrl">
+      <!-- 播放中 → 暂停（白底描边圆按钮） -->
+      <div class="pp"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg></div>
+      <!-- 下一首：三角 + 竖条 -->
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zm10-12v12h2V6h-2z"/></svg>
+      <!-- 播放列表 -->
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zm14-6v3.1a4 4 0 1 0 2 3.4V8h-2v2z"/></svg>
+    </div>
+  </div>
+
+  <!-- 底部 TAB 栏：现状保留，四个页签一个不少 -->
+  <div class="tabbar">
+    <div class="tab on">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.6a4 4 0 1 0 2 3.4V7h5V3h-7z"/></svg>
+      我的
+    </div>
+    <div class="tab">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm-8 12V6l5 4-5 4zM4 6H2v14a2 2 0 0 0 2 2h14v-2H4V6z"/></svg>
+      歌单
+    </div>
+    <div class="tab">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.8l-.3-.3a6.5 6.5 0 1 0-.7.7l.3.3v.8l5 5 1.5-1.5-5-5zm-5 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z"/></svg>
+      搜歌
+    </div>
+    <div class="tab">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-1.7-1L15 3.5h-4l-.3 2.5a7.5 7.5 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.5 7.5 0 0 0 1.7 1l.3 2.5h4l.3-2.5a7.5 7.5 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1,-1)"/></svg>
+      设置
+    </div>
+  </div>
+</div>
+
+<div class="notes">
+  <h2>说明</h2>
+  <div class="note-grid">
+    <div class="note"><b>保留现状</b>：顶栏、曲库头卡、吸顶搜索框「搜索歌曲 / 歌手 / 专辑」、播放全部、排序胶囊、<b>按网盘来源筛选的小胶囊</b>、每行「歌手 · 来源（OneDrive / 坚果云）」、格式徽标、<b>⋮ 更多菜单</b>、<b>底部 TAB 栏（我的 / 歌单 / 搜歌 / 设置）</b>以及浮在它上面的迷你播放器。</div>
+    <div class="note"><b>本次调整</b>：① 去掉行尾的 <code>+</code>（加入队列）按钮，功能不丢——⋮ 菜单里仍有「播放 / 加入播放队列 / 歌曲信息」三项；② 迷你播放器按钮按真实结构修正为 暂停 / <b>下一首</b> / 播放列表（之前把下一首画成了暂停图标）。</div>
+    <div class="note"><b>可行性：完全可行</b> —— 封面链路（iTunes 检索 + SQLite 缓存 + 内存 LruCache）播放页已经打通，列表行直接复用同一套缓存，播过的歌进列表秒出封面。</div>
+    <div class="note"><b>限流是关键</b>：iTunes 限约 20 次/分钟，长列表滚动不能挨个查。策略：只为「可见行」查，串行队列 + 节流，查过的存 SQLite 终身免查；未命中的行保持渐变占位图（行 4/5），不阻塞滚动。</div>
+    <div class="note"><b>渐进式加载</b>：进列表先全部显示占位图，封面在后台按可见顺序慢慢补齐，位置用占位图撑住不跳动；迷你播放器/播放页/列表三处共用一张缓存图。</div>
+    <div class="note"><b>改动范围</b>：SongRow 的 56dp 缩略图换成「封面优先、占位兜底」的组件，迷你播放器封面同样处理；LibraryScreen 的 TrackRow 去掉 <code>+</code> 保留 ⋮；搜索/筛选/来源逻辑一行不动。</div>
+    <div class="note"><b>一个要注意的点</b>：曲库页现在左侧是<b>序号</b>不是封面（<code>index</code> 优先于封面）。若你要的是「曲库」也显示封面，得把序号一并去掉；歌单/搜索结果页本来就是封面，直接换图即可。这点等你确认。</div>
+  </div>
+</div>
+</body>
+</html>

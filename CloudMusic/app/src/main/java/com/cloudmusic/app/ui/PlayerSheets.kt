@@ -1,5 +1,7 @@
 package com.cloudmusic.app.ui
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -33,10 +35,23 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.Surface
@@ -45,66 +60,175 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.cloudmusic.app.App
 import com.cloudmusic.app.data.Track
+import kotlin.math.abs
 
-/** 唱片页：黑胶 + 唱臂，下面挂一条音质胶囊。 */
+/**
+ * 封面页：全出血封面卡片（iTunes 查到的真封面），
+ * 查不到时用程序生成的装饰画顶上，风格跟背景取色一脉相承。
+ * 左上=来源角标，左下=歌手，右下=队列序号。
+ */
 @Composable
-fun DiscPage(
+fun CoverPage(
     title: String,
-    rotating: Boolean,
+    artist: String,
+    coverUrl: String?,
+    sourceLabel: String,
+    index: Int,
+    total: Int,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
-        // 小屏别让唱片顶出去 —— 按可用高度缩（卡片有 padding，多留点）
-        val maxH = maxHeight
-        val disc = minOf(
-            (maxH - 100.dp).coerceIn(160.dp, 300.dp),
-            (maxWidth - 84.dp).coerceIn(160.dp, 300.dp),
-        )
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            // 白色方圆卡 + 克制的投影：24dp 的投影落在浅底上会显脏。
-            // 右下角那个「Q」圆标只是遗留装饰，和下面这条来源胶囊信息重复，去掉。
-            Surface(
-                shape = RoundedCornerShape(28.dp),
-                color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 10.dp
-            ) {
-                Box(Modifier.padding(22.dp)) {
-                    VinylDisc(title = title, rotating = rotating, discSize = disc.value.toInt())
-                }
-            }
-            Spacer(Modifier.height(14.dp))
-            // 描边轻胶囊：跟播放页背景取同一套封面色，灰底实心那块补丁感太重
-            val accentColors = coverColors(title)
-            val accentDark = accentColors[1]
-            Row(
-                Modifier
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(accentColors[0].copy(alpha = 0.08f))
-                    .border(
-                        width = 1.dp,
-                        color = accentColors[0].copy(alpha = 0.28f),
-                        shape = RoundedCornerShape(16.dp)
+        // 尽量占满宽度；高度不够就按高度收成正方形
+        val side = minOf(maxWidth, maxHeight - 24.dp).coerceAtLeast(200.dp)
+
+        Surface(
+            shape = RoundedCornerShape(26.dp),
+            color = MaterialTheme.colorScheme.surface,
+            shadowElevation = 6.dp,
+            modifier = Modifier.size(side)
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                val bmp = rememberCoverBitmap(coverUrl)
+                if (bmp != null) {
+                    Image(
+                        bitmap = bmp,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
                     )
-                    .padding(horizontal = 12.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    Icons.Filled.GraphicEq,
-                    contentDescription = null,
-                    tint = accentDark,
-                    modifier = Modifier.size(14.dp)
+                } else {
+                    // 没封面/还没下完：程序生成的装饰画，别让卡片空着
+                    GeneratedCover(seed = title.ifBlank { "?" }, modifier = Modifier.fillMaxSize())
+                }
+
+                // 上下角文字的可读性底：顶部和底部各一层淡黑渐隐
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color.Black.copy(alpha = 0.20f),
+                                    Color.Transparent,
+                                    Color.Transparent,
+                                    Color.Black.copy(alpha = 0.28f),
+                                )
+                            )
+                        )
                 )
-                Spacer(Modifier.width(6.dp))
+
+                // 左上：来源 + 音质
                 Text(
-                    "网盘直连 · 原音质",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Medium,
-                    color = accentDark
+                    sourceLabel,
+                    fontSize = 11.sp,
+                    letterSpacing = 2.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White.copy(alpha = 0.92f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(start = 20.dp, top = 18.dp)
                 )
+                // 左下：歌手（衬线 + 字距，像专辑封面的题字）
+                Text(
+                    (artist.ifBlank { title }).ifBlank { "未知歌手" },
+                    fontSize = 19.sp,
+                    letterSpacing = 3.sp,
+                    fontFamily = FontFamily.Serif,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 20.dp, bottom = 18.dp, end = 90.dp)
+                )
+                // 右下：队列序号（不在队列里就不显示）
+                if (index > 0 && total > 0) {
+                    Text(
+                        "%02d / %02d".format(index, total),
+                        fontSize = 11.sp,
+                        letterSpacing = 1.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White.copy(alpha = 0.9f),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 20.dp, bottom = 18.dp)
+                    )
+                }
             }
         }
     }
+}
+
+/** 下载封面位图。仓库里带 LruCache，来回切歌不重复下载。 */
+@Composable
+private fun rememberCoverBitmap(url: String?): ImageBitmap? {
+    var bmp by remember(url) { mutableStateOf<ImageBitmap?>(null) }
+    val app = LocalContext.current.applicationContext as? App
+    LaunchedEffect(url) {
+        if (url.isNullOrBlank() || app == null) {
+            bmp = null
+            return@LaunchedEffect
+        }
+        app.coverRepository.artwork(url)?.let { bmp = it.asImageBitmap() }
+    }
+    return bmp
+}
+
+/**
+ * 查不到封面时的程序化占位画：
+ * 歌名哈希选调色板 → 渐变天 + 圆日 + 三层山影。
+ * 每首歌构图略有不同，但整体风格统一。
+ */
+@Composable
+private fun GeneratedCover(seed: String, modifier: Modifier = Modifier) {
+    val palette = coverColors(seed)
+    val variant = abs(seed.hashCode())
+    Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+
+        // 天空：调色板深色在上、亮色在下
+        drawRect(
+            Brush.verticalGradient(
+                colors = listOf(palette[1], palette[0]),
+                startY = 0f, endY = h
+            )
+        )
+
+        // 圆日：位置大小随歌名哈希微调
+        val sunR = h * (0.13f + (variant % 40) / 400f)
+        val sunX = w * (0.30f + (variant % 30) / 100f)
+        val sunY = h * (0.22f + (variant % 17) / 100f)
+        drawCircle(
+            Color(0xFFF6EFD4).copy(alpha = 0.15f),
+            radius = sunR * 2.0f,
+            center = Offset(sunX, sunY)
+        )
+        drawCircle(
+            Color(0xFFF6EFD4).copy(alpha = 0.95f),
+            radius = sunR,
+            center = Offset(sunX, sunY)
+        )
+
+        // 山影：三层叠弧，一层比一层深、一层比一层近
+        drawHill(lerp(palette[1], Color.Black, 0.25f), w * -0.15f, h * 0.88f, w * 0.75f, h * 0.60f)
+        drawHill(lerp(palette[1], Color.Black, 0.40f), w * 0.08f, h * 0.92f, w * 0.85f, h * 0.62f)
+        drawHill(lerp(palette[1], Color.Black, 0.55f), w * 0.55f, h * 0.96f, w * 0.80f, h * 0.66f)
+    }
+}
+
+/** 一座山：从底线拱起来的抛物线，闭合填色。 */
+private fun DrawScope.drawHill(color: Color, left: Float, baseY: Float, width: Float, height: Float) {
+    val path = Path().apply {
+        moveTo(left, baseY)
+        quadraticBezierTo(left + width / 2f, baseY - height, left + width, baseY)
+        close()
+    }
+    drawPath(path, color)
 }
 
 /** 歌词页：跟网易云一样，当前行放大加粗居中。 */

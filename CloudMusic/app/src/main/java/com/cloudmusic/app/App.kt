@@ -3,6 +3,7 @@ package com.cloudmusic.app
 import android.app.Application
 import com.cloudmusic.app.data.LibraryDb
 import com.cloudmusic.app.data.LibraryRepository
+import com.cloudmusic.app.data.CoverRepository
 import com.cloudmusic.app.data.LyricsRepository
 import com.cloudmusic.app.data.MusicSearchRepository
 import com.cloudmusic.app.data.Prefs
@@ -29,6 +30,8 @@ class App : Application() {
     lateinit var repository: LibraryRepository
         private set
     lateinit var lyricsRepository: LyricsRepository
+        private set
+    lateinit var coverRepository: CoverRepository
         private set
     lateinit var oneDriveAuth: OneDriveAuth
         private set
@@ -76,6 +79,8 @@ class App : Application() {
         liumingye = LiumingyeSource(repository.http)
         // 歌词的兜底源是下歌吧（QQ 音乐搜不到的冷门歌它有）
         lyricsRepository = LyricsRepository(prefs, db, repository.http, oneDriveProvider, liumingye)
+        // 封面走 iTunes Search API（免费无 Key），SQLite 里存直链
+        coverRepository = CoverRepository(db, repository.http)
         quarkClient = QuarkClient(repository.http) { prefs.quarkCookie }
         // 网盘音源（下歌吧 → 夸克网盘）。网易云很多歌只有 30 秒试听，
         // 完整版得从网盘拿，所以在线搜歌和歌单导入都用它兜底。

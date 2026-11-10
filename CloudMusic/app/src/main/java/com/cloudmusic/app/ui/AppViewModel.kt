@@ -98,6 +98,52 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** 每首歌的歌词结果，避免来回切歌时反复请求 */
     private val lyricsCache = mutableMapOf<String, LyricsUiState>()
 
+    var coverUrl by mutableStateOf<String?>(null)
+        private set
+
+    private var coverJob: Job? = null
+
+    /** 正在查封面的曲目，避免同一首重复发请求 */
+    private var coverLoadingId: String? = null
+
+    /** 每首歌的封面结果（空串 = 查过没有），负缓存只放内存，下次启动还能重试 */
+    private val coverCache = mutableMapOf<String, String>()
+
+    /**
+     * 加载封面：切歌时跟着歌词一起调。
+     * 命中就秒换图，没查到也别让占位图闪来闪去。
+     */
+    fun loadCover(track: Track?) {
+        val id = track?.key
+        if (id == null) {
+            coverJob?.cancel()
+            coverLoadingId = null
+            coverUrl = null
+            return
+        }
+        // 已经拿到过（或确认没有），直接用
+        coverCache[id]?.let {
+            coverJob?.cancel()
+            coverLoadingId = null
+            coverUrl = it.ifBlank { null }
+            return
+        }
+        // 正在查同一首，等着就行
+        if (coverLoadingId == id && coverJob?.isActive == true) return
+
+        coverJob?.cancel()
+        coverLoadingId = id
+        // 新歌还没查到封面：先清掉上一首的，别让旧封面挂在新歌上
+        coverUrl = null
+        coverJob = viewModelScope.launch {
+            val url = appRef.coverRepository.load(track)
+            coverCache[id] = url ?: ""
+            // 查完还在听这首才上图，不然刚切走的歌把新歌的封面顶掉了
+            if (player.currentTrack?.key == id) coverUrl = url
+            coverLoadingId = null
+        }
+    }
+
     var loggedIn by mutableStateOf(false)
         private set
 

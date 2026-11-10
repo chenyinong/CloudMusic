@@ -23,13 +23,16 @@ class LibraryDb(context: Context) :
         const val TABLE_LYRICS = "lyrics"
         const val TABLE_LYRIC_FILES = "lyric_files"
 
+        /** 专辑封面直链缓存（key = 曲目 key，url = iTunes 图 URL） */
+        const val TABLE_COVERS = "covers"
+
         /** 存下来的歌单（只存清单，歌曲在网盘里） */
         const val TABLE_PLAYLISTS = "playlists"
 
         /** 歌单里的每一首歌 */
         const val TABLE_PLAYLIST_TRACKS = "playlist_tracks"
 
-        const val VERSION = 6
+        const val VERSION = 7
 
         fun lyricKey(providerId: String, folder: String, base: String): String =
             "$providerId|${folder.lowercase()}|${base.lowercase()}"
@@ -56,6 +59,7 @@ class LibraryDb(context: Context) :
         )
         createLyricsTables(db)
         createPlaylistTables(db)
+        createCoverTable(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -102,6 +106,7 @@ class LibraryDb(context: Context) :
             db.execSQL("ALTER TABLE ${TABLE}_new RENAME TO $TABLE")
         }
         if (oldVersion < 6) createPlaylistTables(db)
+        if (oldVersion < 7) createCoverTable(db)
     }
 
     /**
@@ -255,6 +260,41 @@ class LibraryDb(context: Context) :
      */
     fun deleteTrack(key: String) {
         writableDatabase.delete(TABLE, "key = ?", arrayOf(key))
+    }
+
+    // ---------- 封面 ----------
+
+    private fun createCoverTable(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS $TABLE_COVERS (
+                trackId TEXT PRIMARY KEY,
+                url TEXT NOT NULL DEFAULT '',
+                updatedAt INTEGER NOT NULL DEFAULT 0
+            )
+            """.trimIndent()
+        )
+    }
+
+    fun saveCover(trackId: String, url: String) {
+        val cv = ContentValues().apply {
+            put("trackId", trackId)
+            put("url", url)
+            put("updatedAt", System.currentTimeMillis())
+        }
+        writableDatabase.insertWithOnConflict(
+            TABLE_COVERS, null, cv, SQLiteDatabase.CONFLICT_REPLACE
+        )
+    }
+
+    fun coverUrl(trackId: String): String? {
+        readableDatabase.rawQuery(
+            "SELECT url FROM $TABLE_COVERS WHERE trackId = ?",
+            arrayOf(trackId)
+        ).use { c ->
+            if (!c.moveToFirst()) return null
+            return c.getString(0)?.takeIf { it.isNotBlank() }
+        }
     }
 
     // ---------- 歌词 ----------

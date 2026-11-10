@@ -307,10 +307,19 @@ fun PlayerScreen(
                 }
         ) { page ->
             if (page == 0) {
-                DiscPage(
+                // 封面左上角的来源角标：网盘直连/在线音源 + 音质
+                val sourceLabel =
+                    (if (track?.provider == "online") "在线音源" else "网盘直连") +
+                        " · " + (formatBadge(track?.fileName) ?: "原音质")
+                // 右下角队列序号（从 1 开始；不在队列里传 0 就不显示）
+                val idx = conn.queue.indexOfFirst { it.key == track?.key }
+                CoverPage(
                     title = title,
-                    // 投屏时手机自己是暂停的，唱片跟着电视转才不别扭
-                    rotating = if (casting != null) dlnaVm.castPlaying else conn.playing,
+                    artist = artist,
+                    coverUrl = vm.coverUrl,
+                    sourceLabel = sourceLabel,
+                    index = if (idx >= 0) idx + 1 else 0,
+                    total = conn.queue.size,
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
