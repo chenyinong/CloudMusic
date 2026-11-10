@@ -66,6 +66,12 @@ class CoverRepository(
 
         const val TAG = "CMDIAG"
 
+        /** 「查过但没有」的负缓存保留 7 天，之后允许重试一次 */
+        private const val NEGATIVE_TTL_MS = 7L * 24 * 60 * 60 * 1000
+
+        /** 磁盘封面缓存上限（按张数），超了按修改时间删最旧的 */
+        private const val MAX_DISK_COVERS = 150
+
         /** 解码后的封面位图内存缓存（500~600px ARGB 约 1.4MB，按张数限 24 张） */
         private val bitmapCache = object : LruCache<String, Bitmap>(24) {
             override fun sizeOf(key: String, value: Bitmap): Int = 1
@@ -120,14 +126,19 @@ class CoverRepository(
             Log.d(TAG, "load HIT-MEM '$it'")
             return@withContext it.ifBlank { null }
         }
-        db.coverUrl(track.key)?.let { cached ->
-            // local: 指向的本地图可能被清缓存删掉，失效就重找，别一直挂着空图
-            if (!cached.startsWith(LOCAL_PREFIX) || File(cached.removePrefix(LOCAL_PREFIX)).exists()) {
+        db.coverRecord(track.key)?.let { (cached, at) ->
+            // 负缓存过期、或 local: 指向的本地图被清掉了，都得重找一遍
+            val negativeExpired = cached.isBlank() &&
+                System.currentTimeMillis() - at > NEGATIVE_TTL_MS
+            val localMissing = cached.startsWith(LOCAL_PREFIX) &&
+                !File(cached.removePrefix(LOCAL_PREFIX)).exists()
+            if (negativeExpired || localMissing) {
+                db.clearCover(track.key)
+            } else {
                 urlCache[track.key] = cached
-                Log.d(TAG, "load HIT-DB $cached")
-                return@withContext cached
+                Log.d(TAG, "load HIT-DB '${cached.take(60)}'")
+                return@withContext cached.ifBlank { null }
             }
-            db.clearCover(track.key)
         }
 
         // 同一首歌可能被列表行、迷你条、播放页同时问，只让第一个真去查
@@ -138,12 +149,15 @@ class CoverRepository(
         var url: String? = null
         try {
             url = resolve(track)
-            // 查过就记下来，没查到也别在同一次启动里反复打接口
             urlCache[track.key] = url ?: ""
-            if (url != null) db.saveCover(track.key, url)
+            // 查过没找到也写进 DB（空串 + 时间戳），下次启动不用再跑一整条检索链。
+            // 7 天后自动过期重试，点「重新查找封面」也会立刻清掉。
+            db.saveCover(track.key, url ?: "")
         } catch (e: Exception) {
+            // 网络异常之类的临时失败不落负缓存，下次启动还能重试
             Log.w(TAG, "load FAILED ${e.javaClass.simpleName}: ${e.message}")
             url = null
+            urlCache[track.key] = ""
         } finally {
             mine.complete(url)
             loadInflight.remove(track.key)
@@ -220,20 +234,55 @@ class CoverRepository(
         bmp
     }
 
+    /** 网络封面下载后落盘，冷启动不用再联网重下一遍。 */
+    private val diskCacheDir: File by lazy {
+        File(filesDir, "cover_cache").apply { mkdirs() }
+    }
+
+    private fun diskFile(url: String): File = File(diskCacheDir, md5(url) + ".img")
+
     private fun decodeArtwork(url: String): Bitmap? {
-        // 本地封面（同目录图 / 内嵌图 / 手动选的图）
+        // 本地封面（同目录图 / 内嵌图 / 手动选的图）本来就在盘上
         if (url.startsWith(LOCAL_PREFIX)) {
             val f = File(url.removePrefix(LOCAL_PREFIX))
             return if (f.exists()) BitmapFactory.decodeFile(f.absolutePath) else null
         }
-        return try {
+
+        val cached = diskFile(url)
+        if (cached.isFile && cached.length() > 0) {
+            BitmapFactory.decodeFile(cached.absolutePath)?.let { return it }
+        }
+        val bytes = try {
             val req = Request.Builder().url(url).header("User-Agent", UA).build()
             shortHttp.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@use null
-                resp.body?.byteStream()?.use { BitmapFactory.decodeStream(it) }
+                resp.body?.bytes()
             }
         } catch (e: Exception) {
             null
+        } ?: return null
+        if (bytes.isEmpty()) return null
+        try {
+            cached.writeBytes(bytes)
+            trimDiskCache()
+        } catch (e: Exception) {
+            // 写缓存失败不影响这次显示
+        }
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    }
+
+    /** 磁盘封面缓存最多留 [MAX_DISK_COVERS] 张，超了按修改时间删最旧的。 */
+    private fun trimDiskCache() {
+        try {
+            val files = diskCacheDir.listFiles()
+                ?.filter { it.isFile }
+                ?.sortedBy { it.lastModified() }
+                ?: return
+            val overflow = files.size - MAX_DISK_COVERS
+            if (overflow <= 0) return
+            files.take(overflow).forEach { it.delete() }
+        } catch (e: Exception) {
+            // 清理是尽力而为，失败不影响使用
         }
     }
 
@@ -400,6 +449,8 @@ class CoverRepository(
         embeddedTried.clear()
         albumCovers.clear()
         reuseDisabled.clear()
+        // 用户可能刚往网盘里补了封面图，之前「没找到」的记录别再挡着
+        db.clearNegativeCovers()
         _changes.value++
     }
 

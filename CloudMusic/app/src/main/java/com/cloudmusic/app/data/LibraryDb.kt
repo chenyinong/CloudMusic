@@ -368,6 +368,25 @@ class LibraryDb(context: Context) :
         }
     }
 
+    /** 曲库变化后清掉「查过但没有」的负缓存，让这些歌重新找一次封面。 */
+    fun clearNegativeCovers() {
+        writableDatabase.delete(TABLE_COVERS, "url = ''", null)
+    }
+
+    /**
+     * 封面记录连同写入时间。url 为空串表示「查过但没有」的负缓存，
+     * 调用方靠 [updatedAt] 判断它是否过期需要重查。
+     */
+    fun coverRecord(trackId: String): Pair<String, Long>? {
+        readableDatabase.rawQuery(
+            "SELECT url, updatedAt FROM $TABLE_COVERS WHERE trackId = ?",
+            arrayOf(trackId)
+        ).use { c ->
+            if (!c.moveToFirst()) return null
+            return (c.getString(0).orEmpty()) to c.getLong(1)
+        }
+    }
+
     // ---------- 歌词 ----------
 
     fun saveLyrics(trackId: String, lrc: String, source: String) {
