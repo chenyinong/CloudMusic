@@ -61,6 +61,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cloudmusic.app.data.ProviderKind
+import com.cloudmusic.app.data.Track
 import com.cloudmusic.app.data.playlist.SavedTrack
 
 /**
@@ -239,12 +240,14 @@ fun PlaylistDetailScreen(
                 val currentKey = vm.currentPlaylistKey
                 items(list, key = { it.key }) { t ->
                     DetailTrackRow(
-                        index = t.position + 1,
                         track = t,
                         phase = vm.phases[t.key],
                         inLibrary = t.key in vm.inLibrary,
                         // 网盘里真能找到这个文件才给「播放」
                         playable = t.key in vm.libraryTracks,
+                        // 音乐已经在网盘里就用真 Track（能命中曲库已有的封面缓存），
+                        // 否则合成一首「只有歌名歌手」的，让封面走在线检索
+                        coverTrack = coverTrackFor(t, vm.libraryTracks[t.key]),
                         // 已下载 / 在线解析的歌统一按当前曲目算，播到下一首会自己挪
                         playing = currentKey == t.key,
                         onlinePlaying = currentKey == t.key && vm.currentIsOnline,
@@ -443,14 +446,41 @@ private fun PlaylistHeader(
     }
 }
 
+/**
+ * 给歌单里的歌造一个能查封面的 [Track]。
+ *
+ * - 已经导入网盘：用曲库匹配到的真 Track，直接命中曲库里已有的封面缓存。
+ * - 还没导入：手上只有歌名/歌手，用平台歌曲 id 造一个跨歌单稳定的 key；
+ *   id/url/folder 全留空，CoverRepository 会跳过同目录图与 2MB 音频头，
+ *   只走在线检索。查到的封面按这个 key 存进 covers 表，别的歌单遇到同一首也能复用。
+ */
+private fun coverTrackFor(t: SavedTrack, library: Track?): Track {
+    if (library != null) return library
+    val stableId = t.platformId.ifBlank { t.trackKey.ifBlank { "${t.title}|${t.artist}" } }
+    return Track(
+        key = "pl:${t.platform.id}:$stableId",
+        id = "",
+        url = "",
+        fileName = "",
+        title = t.title,
+        artist = t.artist,
+        album = t.album,
+        folder = "",
+        size = 0L,
+        mime = "",
+        provider = "online-pending",
+    )
+}
+
 @Composable
 private fun DetailTrackRow(
-    index: Int,
     track: SavedTrack,
     phase: TrackPhase?,
     inLibrary: Boolean,
     /** 网盘里能找到这个文件，可以播 */
     playable: Boolean,
+    /** 查封面用：已导入的是曲库真 Track，否则是只有歌名歌手的合成 Track */
+    coverTrack: Track?,
     /** 正在放这首 */
     playing: Boolean,
     onlinePlaying: Boolean,
@@ -483,32 +513,42 @@ private fun DetailTrackRow(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // B 方案：正在播（含在线播）时序号位换成均衡器条，
-        // 播放状态放在这里，就不用在右侧再塞一个播放按钮了。
-        Box(Modifier.width(28.dp), contentAlignment = Alignment.Center) {
+        // 封面放行首；正在播的那首在右下角挂个均衡器圆标，
+        // 去掉序号后也还能一眼看出当前曲目，不用在右侧多塞一个按钮。
+        Box(Modifier.size(44.dp)) {
+            CoverThumb(
+                track = coverTrack,
+                seed = track.album.ifBlank { track.title },
+                size = 44.dp,
+                corner = 8.dp
+            )
             if (playing || onlinePlaying) {
-                Row(
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                Box(
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .size(18.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary),
+                    contentAlignment = Alignment.Center
                 ) {
-                    listOf(6.dp, 12.dp, 8.dp).forEach { h ->
-                        Box(
-                            Modifier
-                                .width(2.5.dp)
-                                .height(h)
-                                .clip(RoundedCornerShape(1.dp))
-                                .background(MaterialTheme.colorScheme.primary)
-                        )
+                    Row(
+                        verticalAlignment = Alignment.Bottom,
+                        horizontalArrangement = Arrangement.spacedBy(1.5.dp)
+                    ) {
+                        listOf(4.dp, 8.dp, 6.dp).forEach { h ->
+                            Box(
+                                Modifier
+                                    .width(2.dp)
+                                    .height(h)
+                                    .clip(RoundedCornerShape(1.dp))
+                                    .background(MaterialTheme.colorScheme.onPrimary)
+                            )
+                        }
                     }
                 }
-            } else {
-                Text(
-                    "$index",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
         }
+        Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 track.title,
