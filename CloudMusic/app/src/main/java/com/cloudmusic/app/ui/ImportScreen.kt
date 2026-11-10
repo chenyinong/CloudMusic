@@ -78,7 +78,7 @@ import com.cloudmusic.app.data.formatBytes
  * 跟设置页用同一套紫，但只在这页生效 —— 全局主色仍是近黑/近白，
  * 曲库、播放页那些按钮不该跟着变。
  */
-private val Accent = Color(0xFF6C5CE7)
+private val Accent = Color(0xFF1A1A1A)
 private val BadgeGreen = Color(0xFF1E8E57)
 private val BadgeGreenBg = Color(0xFFE6F6EC)
 
@@ -591,8 +591,8 @@ private fun ProviderOption(
                 .size(38.dp)
                 .clip(RoundedCornerShape(11.dp))
                 .background(
-                    if (kind == ProviderKind.ONEDRIVE) Color(0xFF2F6FED)
-                    else Color(0xFF7A5AF8)
+                    if (kind == ProviderKind.ONEDRIVE) Color(0xFF1A1A1A)
+                    else Color(0xFF1A1A1A)
                 ),
             contentAlignment = Alignment.Center
         ) {
