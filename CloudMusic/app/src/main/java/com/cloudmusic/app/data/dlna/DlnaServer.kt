@@ -13,6 +13,7 @@ import java.io.InputStream
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.net.ServerSocket
+import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URLDecoder
 import java.net.URLEncoder
@@ -67,6 +68,8 @@ class DlnaServer(
     private val ssdpReady = AtomicBoolean(false)
     private var serverSocket: ServerSocket? = null
     private var ssdp: SsdpResponder? = null
+    /** 当前正在投屏的歌（含在线歌），serveMedia 在曲库里查不到时兜底用 */
+    private var castTrack: Track? = null
     private var pool: ExecutorService? = null
 
     /** HTTP 端口 */
@@ -116,6 +119,16 @@ class DlnaServer(
     /** 订阅了事件的设备 */
     private val subscribers = ConcurrentHashMap<String, Subscriber>()
 
+    /** 常规浏览器 UA：部分 CDN（如 QQ 音乐）会拦截非常规 UA 直接 403 */
+    private val BROWSER_UA =
+        "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+    /** 探测到的上游文件大小缓存（在线歌等 size 未知时，用于毫秒→字节换算） */
+    private val sizeCache = ConcurrentHashMap<String, Long>()
+    /** 每首歌上次代理发给设备的字节数（无时长时用于字节级断点续播） */
+    private val bytesSent = ConcurrentHashMap<String, Long>()
+    /** 字节级起始偏移（无时长断点用），优先于毫秒偏移 */
+    private val startOffsetBytes = ConcurrentHashMap<String, Long>()
+
     /** 每首歌这次要从哪儿开始播（ms），见 [setStartOffset] */
     private val startOffsets = ConcurrentHashMap<String, Long>()
 
@@ -128,6 +141,29 @@ class DlnaServer(
 
     // ---------------- 生命周期 ----------------
 
+    /**
+     * 优先用固定端口，避免每次重启都换端口、导致音箱缓存的旧地址失效连不上；
+     * 端口被占用（上次的 TIME_WAIT 等）就顺延尝试几个，都失败再退回随机端口。
+     */
+    private fun bindPort(): ServerSocket {
+        val candidates = listOf(38000, 38001, 38002, 38003)
+        for (p in candidates) {
+            try {
+                val s = ServerSocket()
+                s.reuseAddress = true
+                s.bind(InetSocketAddress(p))
+                Log.d(TAG, "DLNA 服务绑定固定端口 $p")
+                return s
+            } catch (e: Exception) {
+                Log.w(TAG, "端口 $p 占用，尝试下一个：${e.message}")
+            }
+        }
+        val s = ServerSocket(0)
+        s.reuseAddress = true
+        Log.w(TAG, "固定端口均不可用，改用随机端口 ${s.localPort}")
+        return s
+    }
+
     fun start(): Boolean {
         if (running.get()) return true
         val lan = findLanIp()
@@ -137,7 +173,7 @@ class DlnaServer(
         }
         return try {
             ip = lan
-            val ss = ServerSocket(0)
+            val ss = bindPort()
             serverSocket = ss
             port = ss.localPort
             val p = Executors.newFixedThreadPool(8)
@@ -207,6 +243,19 @@ class DlnaServer(
     fun setStartOffset(key: String, offsetMs: Long) {
         if (offsetMs > 0) startOffsets[key] = offsetMs else startOffsets.remove(key)
     }
+
+    /** 记录当前投屏的歌（在线歌不在网盘曲库里，serveMedia 要兜底查它） */
+    fun setCastTrack(t: Track?) {
+        castTrack = t
+    }
+
+    /** 字节级起始偏移（无时长断点用）：设了就优先于毫秒偏移 */
+    fun setStartOffsetBytes(key: String, bytes: Long) {
+        if (bytes > 0) startOffsetBytes[key] = bytes else startOffsetBytes.remove(key)
+    }
+    fun startOffsetBytesOf(key: String): Long = startOffsetBytes[key] ?: 0L
+    /** 上次代理发给设备的字节数，无时长时当作断点起点 */
+    fun bytesSentFor(key: String): Long = bytesSent[key] ?: 0L
 
     /** 这首歌当前的起始偏移（毫秒），0 表示从头播 */
     fun startOffsetOf(key: String): Long = startOffsets[key] ?: 0L
@@ -306,6 +355,7 @@ class DlnaServer(
         headers: Map<String, String>,
         body: String,
     ) {
+        Log.d(TAG, "ROUTE $method $path host=${headers["host"]}")
         val lower = path.lowercase()
         when {
             lower == "/description.xml" || lower.endsWith("/description.xml") ->
@@ -771,7 +821,8 @@ class DlnaServer(
     private fun currentDurationMs(): Long {
         val key = keyOf(currentUri)
         if (key.isEmpty()) return 0
-        val track = tracksProvider().firstOrNull { it.key == key } ?: return 0
+        val track = tracksProvider().firstOrNull { it.key == key }
+            ?: castTrack?.takeIf { it.key == key } ?: return 0
         return (track.durationSec * 1000).toLong()
     }
 
@@ -839,6 +890,24 @@ class DlnaServer(
 
     // ---------------- 媒体代理 ----------------
 
+    /** 探测上游总大小（track.size 未知时，用于把毫秒偏移换算成字节）。 */
+    private fun probeContentLength(url: String, extra: Map<String, String>): Long? {
+        return try {
+            val req = Request.Builder().url(url)
+                .header("Range", "bytes=0-1")
+                .header("User-Agent", BROWSER_UA)
+            for ((k, v) in extra) req.header(k, v)
+            http.newCall(req.build()).execute().use { resp ->
+                resp.header("Content-Range")?.let { cr ->
+                    val i = cr.lastIndexOf('/')
+                    if (i >= 0) cr.substring(i + 1).toLongOrNull() else null
+                } ?: resp.header("Content-Length")?.toLongOrNull()
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     private fun serveMedia(
         sock: Socket,
         method: String,
@@ -847,6 +916,7 @@ class DlnaServer(
     ) {
         val key = keyOf(path)
         val track = tracksProvider().firstOrNull { it.key == key }
+            ?: castTrack?.takeIf { it.key == key }
         if (track == null) {
             writeText(sock, 404, "text/plain; charset=utf-8", "找不到这首歌")
             return
@@ -859,14 +929,45 @@ class DlnaServer(
 
         val builder = Request.Builder().url(url)
         // 起始偏移优先于设备自己发的 Range ——
-        // 设备重拉时会发 Range: bytes=0-，但我们要从用户拖到的位置开始给
-        val offset = startOffsetOf(track.key)
-        val range = offset.takeIf { it > 0 }?.let { "bytes=$it-" }
-            ?: headers["range"]?.takeIf { it.isNotBlank() }
-            ?: queryOf(path, "start")?.toLongOrNull()?.takeIf { it > 0 }?.let { "bytes=$it-" }
+        // 设备重拉时会发 Range: bytes=0-，但我们要从用户拖到的位置开始给。
+        // 注意 setStartOffset / ?start= 记的都是「毫秒」，HTTP Range 要的是「字节」，
+        // 这里按平均码率换算一次，否则像小米这类设备会几乎从头播。
+        val durMs = (track.durationSec * 1000.0).toLong().coerceAtLeast(1L)
+        // 在线歌等未知文件大小时，先探测上游总大小（才能把毫秒偏移换算成字节）
+        var sizeB = track.size.toLong()
+        if (sizeB <= 0) {
+            sizeB = sizeCache[track.key] ?: run {
+                val p = probeContentLength(url, track.extraHeaders)
+                if (p != null) sizeCache[track.key] = p
+                p ?: 0L
+            }
+        }
+        fun msToByte(ms: Long): Long =
+            if (sizeB > 0 && durMs > 0) (ms * sizeB / durMs).coerceIn(0L, sizeB) else 0
+        val offsetMs = startOffsetOf(track.key)
+        // 无时长断点：用「上次已发字节数」做字节级偏移（不需要时长也能续播）
+        val offsetBytes = startOffsetBytesOf(track.key)
+        val range = when {
+            offsetBytes > 0 -> "bytes=$offsetBytes-"
+            offsetMs > 0 -> msToByte(offsetMs).takeIf { it > 0 }?.let { "bytes=$it-" }
+            else -> null
+        } ?: headers["range"]?.takeIf { it.isNotBlank() }
+            ?: queryOf(path, "start")?.toLongOrNull()?.takeIf { it > 0 }
+                ?.let { msToByte(it) }?.let { "bytes=$it-" }
         range?.let { builder.header("Range", it) }
+        // 探测请求（bytes=0-0 / 0-1）只是测大小，不算已播放进度
+        val isProbe = range == "bytes=0-0" || range == "bytes=0-1"
+        // 本次代理实际写给设备的字节数（暂停重拉时作为字节级断点起点）
+        var sent = 0L
+        Log.d(TAG, "serveMedia GET key=$key durSec=${track.durationSec} offsetMs=$offsetMs offsetBytes=$offsetBytes finalRange=$range devRange=${headers["range"]}")
         StreamAuth.header(prefs, hostOf(url))?.let { builder.header("Authorization", it) }
-        builder.header("User-Agent", "CloudMusic/1.0 (Android)")
+        // 用常规浏览器 UA：部分 CDN（如 QQ 音乐）会拦截非常规 UA 直接 403
+        builder.header("User-Agent", BROWSER_UA)
+        // 转发平台防盗链 header（QQ/网易云直链常需要 Referer/Cookie 等才放行，
+        // 否则上游直接 403）。放最后，让平台自己的 header 优先于默认 UA。
+        for ((k, v) in track.extraHeaders) {
+            builder.header(k, v)
+        }
 
         try {
             http.newCall(builder.build()).execute().use { resp ->
@@ -879,12 +980,13 @@ class DlnaServer(
                 head.append("Accept-Ranges: bytes\r\n")
 
                 val upstreamLen = resp.header("Content-Length")
+                Log.d(TAG, "serveMedia upstream code=${resp.code} hasLen=${upstreamLen != null}")
                 if (upstreamLen != null) {
                     head.append("Content-Length: ").append(upstreamLen).append("\r\n")
                     head.append("Connection: close\r\n\r\n")
                     out.write(head.toString().toByteArray(Charsets.ISO_8859_1))
                     if (method != "HEAD") {
-                        resp.body?.byteStream()?.use { ins -> copy(ins, out) }
+                        resp.body?.byteStream()?.use { ins -> sent += copy(ins, out, key, isProbe) }
                     }
                 } else {
                     // 上游是分块传输的。我们自己重新分块，
@@ -898,6 +1000,8 @@ class DlnaServer(
                             while (true) {
                                 val n = ins.read(buf)
                                 if (n <= 0) break
+                                sent += n
+                                if (!isProbe) bytesSent[key] = sent
                                 out.write("${Integer.toHexString(n)}\r\n".toByteArray(Charsets.ISO_8859_1))
                                 out.write(buf, 0, n)
                                 out.write("\r\n".toByteArray(Charsets.ISO_8859_1))
@@ -907,9 +1011,13 @@ class DlnaServer(
                     }
                 }
                 out.flush()
+                // 记下本次发给设备的字节数（暂停后重拉时作为字节级断点起点）
+                if (sent > 1024) bytesSent[key] = sent
             }
         } catch (e: Exception) {
             Log.w(TAG, "媒体代理失败：${e.message}")
+            // 设备暂停会中断连接，这里 sent 已是断点处已发字节
+            if (sent > 1024) bytesSent[key] = sent
             try {
                 writeText(sock, 502, "text/plain; charset=utf-8", "读取网盘失败")
             } catch (_: Exception) {
@@ -917,13 +1025,18 @@ class DlnaServer(
         }
     }
 
-    private fun copy(ins: java.io.InputStream, out: java.io.OutputStream) {
+    private fun copy(ins: java.io.InputStream, out: java.io.OutputStream, key: String, isProbe: Boolean): Long {
         val buf = ByteArray(32 * 1024)
+        var total = 0L
         while (true) {
             val n = ins.read(buf)
             if (n <= 0) break
             out.write(buf, 0, n)
+            total += n
+            // 实时记下已发字节（暂停后重拉时作为断点起点），探测请求不记
+            if (!isProbe) bytesSent[key] = total
         }
+        return total
     }
 
     /**

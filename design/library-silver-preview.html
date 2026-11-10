@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>「我的」页 · 银灰渐变效果图</title>
+<style>
+  * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+  body {
+    margin: 0; min-height: 100vh; padding: 36px 26px;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    color: #1b1d21;
+    background: radial-gradient(1100px 700px at 20% 0%, #f2f4f6, #e6e9ee 70%, #dfe3e9);
+    display: flex; align-items: center; justify-content: center; gap: 50px; flex-wrap: wrap;
+  }
+
+  /* ── 四套配色，只切 CSS 变量，DOM 完全一样 ── */
+  body[data-scheme="a"] {
+    --page: #f5f6f8;
+    --hero: linear-gradient(120deg, #23272e, #3d444e);
+    --hero-ink: #ffffff;
+    --hero-sub: rgba(255,255,255,.72);
+    --hero-line: rgba(255,255,255,.12);
+    --hero-eq: rgba(255,255,255,.09);
+    --hero-border: rgba(255,255,255,.08);
+    --card: #ffffff;
+    --list-bg: transparent;
+    --field: #ebecee;
+    --chip: #ebecee;
+    --chip-ink: #6e7175;
+    --line: #eceef1;
+  }
+  body[data-scheme="b"] {
+    --page: radial-gradient(130% 65% at 12% -8%, #ffffff 0%, rgba(255,255,255,0) 58%),
+            linear-gradient(165deg, #fbfcfd 0%, #eef1f5 38%, #e1e6ec 72%, #f3f5f8 100%);
+    --hero: linear-gradient(120deg, #23272e, #3d444e);
+    --hero-ink: #ffffff;
+    --hero-sub: rgba(255,255,255,.72);
+    --hero-line: rgba(255,255,255,.12);
+    --hero-eq: rgba(255,255,255,.09);
+    --hero-border: rgba(255,255,255,.08);
+    --card: rgba(255,255,255,.86);
+    --list-bg: rgba(255,255,255,.70);
+    --field: rgba(255,255,255,.74);
+    --chip: rgba(255,255,255,.62);
+    --chip-ink: #6e7175;
+    --line: rgba(120,130,145,.13);
+  }
+  body[data-scheme="c"] {
+    --page: #f5f6f8;
+    --hero: radial-gradient(125% 95% at 8% -8%, rgba(255,255,255,.95) 0%, rgba(255,255,255,0) 58%),
+            linear-gradient(135deg, #f9fbfd 0%, #e0e5eb 46%, #c2cad4 100%);
+    --hero-ink: #23272e;
+    --hero-sub: rgba(35,39,46,.66);
+    --hero-line: rgba(35,39,46,.13);
+    --hero-eq: rgba(35,39,46,.09);
+    --hero-border: rgba(255,255,255,.75);
+    --card: #ffffff;
+    --list-bg: transparent;
+    --field: #ebecee;
+    --chip: #ebecee;
+    --chip-ink: #6e7175;
+    --line: #eceef1;
+  }
+  body[data-scheme="d"] {
+    --page: radial-gradient(130% 65% at 12% -8%, #ffffff 0%, rgba(255,255,255,0) 58%),
+            linear-gradient(165deg, #fcfdfe 0%, #eef1f5 38%, #dfe4ea 72%, #f2f4f7 100%);
+    --hero: radial-gradient(120% 90% at 6% -10%, rgba(255,255,255,.98) 0%, rgba(255,255,255,0) 56%),
+            linear-gradient(135deg, #f4f7fa 0%, #d9dfe6 48%, #b9c1cb 100%);
+    --hero-ink: #23272e;
+    --hero-sub: rgba(35,39,46,.66);
+    --hero-line: rgba(35,39,46,.13);
+    --hero-eq: rgba(35,39,46,.08);
+    --hero-border: rgba(255,255,255,.85);
+    --card: rgba(255,255,255,.84);
+    --list-bg: rgba(255,255,255,.68);
+    --field: rgba(255,255,255,.72);
+    --chip: rgba(255,255,255,.6);
+    --chip-ink: #6e7175;
+    --line: rgba(120,130,145,.13);
+  }
+
+  .stage { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .stage-label { font-size: 12px; letter-spacing: .16em; color: #7c8792; font-weight: 700; }
+
+  /* ── 手机 ── */
+  .phone {
+    position: relative; width: 380px; height: 800px; flex: none;
+    border-radius: 40px; overflow: hidden;
+    background: var(--page);
+    box-shadow: 0 30px 70px rgba(30,40,55,.20), 0 0 0 9px #1d2126, 0 0 0 10px #3a4048;
+    transition: background .35s ease;
+  }
+  .statusbar {
+    height: 34px; padding: 0 20px; display: flex; align-items: center; justify-content: space-between;
+    font-size: 11px; font-weight: 700; color: #4a5058; position: relative; z-index: 3;
+  }
+  .topbar {
+    height: 48px; display: flex; align-items: center; justify-content: center;
+    position: relative; z-index: 3; font-size: 15px; font-weight: 600; color: #23272e;
+  }
+  .topbar .acts { position: absolute; right: 12px; display: flex; gap: 6px; }
+  .topbar .acts svg { width: 19px; height: 19px; fill: #4b515a; }
+
+  /* 头卡 */
+  .hero {
+    position: relative; margin: 8px 16px 0; height: 136px; border-radius: 24px; overflow: hidden;
+    background: var(--hero); border: 1px solid var(--hero-border);
+    color: var(--hero-ink); transition: background .35s ease, color .35s ease;
+  }
+  .hero .ring {
+    position: absolute; border: 1px solid var(--hero-line); border-radius: 50%;
+  }
+  .hero .ring.one { width: 150px; height: 150px; top: -44px; right: -30px; }
+  .hero .ring.two { width: 92px; height: 92px; bottom: -40px; right: 26px; }
+  .hero .eq {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    width: 88px; height: 88px; fill: var(--hero-eq);
+  }
+  .hero .inner { position: relative; height: 100%; padding: 18px 20px; display: flex; flex-direction: column; }
+  .hero .kicker { font-size: 10px; letter-spacing: 1.4px; font-weight: 700; color: var(--hero-sub); }
+  .hero .big { display: flex; align-items: flex-end; gap: 7px; margin-top: 1px; }
+  .hero .big b { font-size: 42px; line-height: 46px; font-weight: 800; letter-spacing: -.02em; }
+  .hero .big span { font-size: 13px; color: var(--hero-sub); padding-bottom: 7px; }
+  .hero .stats { margin-top: auto; display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--hero-sub); }
+  .hero .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--hero-sub); }
+
+  /* 搜索框（吸顶示意） */
+  .searchrow { padding: 10px 16px 8px; background: transparent; position: relative; z-index: 2; }
+  .field {
+    height: 40px; border-radius: 22px; background: var(--field);
+    border: 1px solid rgba(255,255,255,.55);
+    display: flex; align-items: center; gap: 9px; padding: 0 14px;
+    font-size: 12.5px; color: #8a9099;
+  }
+  .field svg { width: 17px; height: 17px; fill: #8a9099; }
+
+  /* 播放全部 + 排序 */
+  .playrow { display: flex; align-items: center; gap: 11px; padding: 4px 16px 8px; position: relative; z-index: 2; }
+  .playbtn {
+    width: 36px; height: 36px; border-radius: 50%; background: #23272e;
+    display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .playbtn svg { width: 17px; height: 17px; fill: #fff; margin-left: 2px; }
+  .playrow .txt { flex: 1; min-width: 0; }
+  .playrow .txt b { display: block; font-size: 13.5px; }
+  .playrow .txt small { display: block; font-size: 10.5px; color: #8a9099; margin-top: 2px; }
+  .sort {
+    display: flex; align-items: center; gap: 4px; border-radius: 10px;
+    background: var(--chip); padding: 7px 10px; font-size: 11px; color: var(--chip-ink);
+  }
+  .sort svg { width: 14px; height: 14px; fill: var(--chip-ink); }
+
+  /* 筛选胶囊 */
+  .chips { display: flex; gap: 8px; padding: 0 16px 8px; position: relative; z-index: 2; }
+  .chip { font-size: 11.5px; padding: 6px 12px; border-radius: 9px; background: var(--chip); color: var(--chip-ink); }
+  .chip.on { background: #23272e; color: #fff; font-weight: 700; }
+
+  /* 歌曲列表 */
+  .songs {
+    margin: 0 8px; border-radius: 20px; background: var(--list-bg);
+    position: relative; z-index: 2; transition: background .35s ease;
+  }
+  .song { display: flex; align-items: center; gap: 10px; height: 60px; padding: 0 10px; }
+  .song + .song { border-top: 1px solid var(--line); }
+  .song .no { width: 24px; text-align: center; font-size: 12px; color: #a6acb4; flex: none; }
+  .song .meta { flex: 1; min-width: 0; }
+  .song .name { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .song .sub { margin-top: 4px; font-size: 10.5px; color: #8a9099; display: flex; align-items: center; gap: 6px; }
+  .badge { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; background: #e9ebee; color: #7b828b; }
+  .song .plus { color: #9aa1aa; font-size: 18px; flex: none; }
+  .song .dots { color: #9aa1aa; font-size: 15px; letter-spacing: -2px; flex: none; }
+
+  /* 底部玻璃条 */
+  .glass {
+    position: absolute; left: 10px; right: 10px; z-index: 5; border-radius: 18px;
+    background: rgba(255,255,255,.80); border: 1px solid rgba(255,255,255,.7);
+    backdrop-filter: saturate(1.1);
+  }
+  .glass::before {
+    content: ""; position: absolute; inset: 0; border-radius: 18px; pointer-events: none;
+    background: linear-gradient(180deg, rgba(255,255,255,.45), rgba(255,255,255,.04));
+  }
+  .mini { bottom: 96px; height: 56px; }
+  .tabbar { bottom: 30px; height: 58px; }
+  .progress { height: 2px; background: rgba(120,130,140,.16); position: relative; z-index: 1; }
+  .progress i { position: absolute; inset: 0 auto 0 0; width: 32%; background: #23272e; }
+  .mini-inner { height: 54px; padding: 0 10px 0 14px; display: flex; align-items: center; gap: 10px; position: relative; z-index: 1; }
+  .cover {
+    width: 40px; height: 40px; border-radius: 50%; flex: none;
+    background: linear-gradient(150deg, #b8bfc7, #7f8893 60%, #545c66);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .cover svg { width: 20px; height: 20px; }
+  .songtitle { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .round {
+    width: 34px; height: 34px; border-radius: 50%; background: #fff;
+    border: 1px solid rgba(120,130,140,.28); display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .round svg { width: 14px; height: 14px; fill: #14171b; }
+  .ico { width: 28px; height: 34px; display: flex; align-items: center; justify-content: center; flex: none; }
+  .ico svg { width: 18px; height: 18px; fill: #2b3037; }
+  .tab-inner { height: 58px; display: flex; align-items: center; position: relative; z-index: 1; }
+  .tab { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 10px; color: #6b727b; }
+  .tab.on { color: #23272e; font-weight: 700; }
+  .tab svg { width: 20px; height: 20px; fill: currentColor; }
+  .sysnav {
+    position: absolute; bottom: 0; left: 0; right: 0; height: 26px; z-index: 6;
+    display: flex; align-items: center; justify-content: center; gap: 46px; color: #9aa0a8; font-size: 12px;
+  }
+
+  /* ── 右侧说明 ── */
+  .info { width: 330px; flex: none; }
+  .kicker { font-size: 11px; letter-spacing: .2em; color: #6b7580; font-weight: 800; }
+  .info h1 { margin: 10px 0 8px; font-size: 25px; letter-spacing: -.01em; }
+  .lead { margin: 0 0 18px; font-size: 12.5px; line-height: 1.75; color: #64707b; }
+  .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  button {
+    font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; text-align: left;
+    padding: 11px 12px; border-radius: 11px; border: 1px solid #d3d9df;
+    background: rgba(255,255,255,.7); color: #39424b; transition: .18s;
+  }
+  button small { display: block; font-weight: 400; font-size: 10.5px; color: #8b949d; margin-top: 3px; }
+  button:hover { border-color: #8b949d; }
+  button.on { background: #23272e; border-color: #23272e; color: #fff; }
+  button.on small { color: rgba(255,255,255,.65); }
+  .desc {
+    margin-top: 14px; padding: 14px 16px; border-radius: 13px;
+    background: rgba(255,255,255,.78); border: 1px solid rgba(255,255,255,.9);
+    box-shadow: 0 10px 26px rgba(40,55,70,.07);
+  }
+  .desc h3 { margin: 0 0 8px; font-size: 13px; }
+  .desc p { margin: 0; font-size: 12px; line-height: 1.8; color: #4c555f; }
+  .verdict { margin-top: 14px; padding: 13px 15px; border-radius: 12px; background: rgba(35,39,46,.07); font-size: 12px; line-height: 1.8; color: #46505a; }
+  .verdict b { color: #23272e; }
+  .foot { margin-top: 14px; font-size: 11px; color: #8b949d; line-height: 1.7; }
+</style>
+</head>
+<body data-scheme="b">
+
+<div class="stage">
+  <div class="stage-label">「我的」页 · 银灰渐变预览</div>
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span>●●● ▮</span></div>
+    <div class="topbar">
+      我的音乐
+      <div class="acts">
+        <svg viewBox="0 0 24 24"><path d="M17.65 6.35A8 8 0 1 0 19.7 14h-2.1a6 6 0 1 1-1.4-3.9L13 13h7V6l-2.35 2.35z"/></svg>
+        <svg viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm9 4 2 1-2 3-2.2-.8a8 8 0 0 1-1.6 1l-.4 2.3h-3.6l-.4-2.3a8 8 0 0 1-1.6-1L8.6 16l-2-3 1.9-1.4a8 8 0 0 1 0-2L6.6 8.2l2-3 2.2.8a8 8 0 0 1 1.6-1L12.8 2.7h3.6l.4 2.3a8 8 0 0 1 1.6 1l2.2-.8 2 3-1.9 1.4a8 8 0 0 1 0 2L21 12z"/></svg>
+      </div>
+    </div>
+
+    <div class="hero">
+      <div class="ring one"></div><div class="ring two"></div>
+      <svg class="eq" viewBox="0 0 24 24"><path d="M3 9h2v6H3V9zm4-4h2v14H7V5zm4 7h2v4h-2v-4zm4-5h2v12h-2V7zm4 3h2v6h-2v-6z"/></svg>
+      <div class="inner">
+        <div class="kicker">MY LIBRARY</div>
+        <div class="big"><b>69</b><span>首歌曲</span></div>
+        <div class="stats"><span>2 个网盘</span><i class="dot"></i><span>45 位歌手</span></div>
+      </div>
+    </div>
+
+    <div class="searchrow">
+      <div class="field">
+        <svg viewBox="0 0 24 24"><path d="M10 3a7 7 0 1 0 4.2 12.6l4.6 4.6 1.4-1.4-4.6-4.6A7 7 0 0 0 10 3zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10z"/></svg>
+        搜索歌曲 / 歌手 / 专辑
+      </div>
+    </div>
+
+    <div class="playrow">
+      <div class="playbtn"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+      <div class="txt"><b>播放全部</b><small>69 首歌曲</small></div>
+      <div class="sort">
+        <svg viewBox="0 0 24 24"><path d="M7 4l4 4H8v8H6V8H3l4-4zm10 16l-4-4h3V8h2v8h3l-4 4z"/></svg>默认
+      </div>
+    </div>
+
+    <div class="chips"><span class="chip on">全部</span><span class="chip">坚果云</span><span class="chip">OneDrive</span></div>
+
+    <div class="songs">
+      <div class="song"><span class="no">1</span><div class="meta"><div class="name">三人游</div><div class="sub">方大同 · OneDrive <span class="badge">FLAC</span></div></div><span class="plus">+</span><span class="dots">⋮</span></div>
+      <div class="song"><span class="no">2</span><div class="meta"><div class="name">十年</div><div class="sub">陈奕迅 · OneDrive <span class="badge">FLAC</span></div></div><span class="plus">+</span><span class="dots">⋮</span></div>
+      <div class="song"><span class="no">3</span><div class="meta"><div class="name">七里香</div><div class="sub">周杰伦 · 坚果云 <span class="badge">FLAC</span></div></div><span class="plus">+</span><span class="dots">⋮</span></div>
+      <div class="song"><span class="no">4</span><div class="meta"><div class="name">走马</div><div class="sub">陈粒 · OneDrive <span class="badge">WAV</span></div></div><span class="plus">+</span><span class="dots">⋮</span></div>
+      <div class="song"><span class="no">5</span><div class="meta"><div class="name">我记得</div><div class="sub">赵雷 · 坚果云 <span class="badge">FLAC</span></div></div><span class="plus">+</span><span class="dots">⋮</span></div>
+      <div class="song"><span class="no">6</span><div class="meta"><div class="name">晴天</div><div class="sub">周杰伦 · OneDrive <span class="badge">FLAC</span></div></div><span class="plus">+</span><span class="dots">⋮</span></div>
+    </div>
+
+    <div class="glass mini">
+      <div class="progress"><i></i></div>
+      <div class="mini-inner">
+        <div class="cover"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></div>
+        <div class="songtitle">我好想你 - 苏打绿</div>
+        <div class="round"><svg viewBox="0 0 24 24"><path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z"/></svg></div>
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M6 5l9 7-9 7V5zm10 0h2v14h-2V5z"/></svg></div>
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M4 6h11v2H4V6zm0 5h11v2H4v-2zm0 5h8v2H4v-2zm14-10h2v10.5a2.5 2.5 0 1 1-2-2.45V6z"/></svg></div>
+      </div>
+    </div>
+
+    <div class="glass tabbar">
+      <div class="tab-inner">
+        <div class="tab on"><svg viewBox="0 0 24 24"><path d="M12 3v10.5a3 3 0 1 1-2-2.83V6.5l7 1.8V4l-7-1z"/></svg><span>我的</span></div>
+        <div class="tab"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4V4zm2 2v12h12V6H6zm2 3h8v2H8V9zm0 4h8v2H8v-2z"/></svg><span>歌单</span></div>
+        <div class="tab"><svg viewBox="0 0 24 24"><path d="M10 3a7 7 0 1 0 4.2 12.6l4.6 4.6 1.4-1.4-4.6-4.6A7 7 0 0 0 10 3zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10z"/></svg><span>搜歌</span></div>
+        <div class="tab"><svg viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm9 4 2 1-2 3-2.2-.8a8 8 0 0 1-1.6 1l-.4 2.3h-3.6l-.4-2.3a8 8 0 0 1-1.6-1L8.6 16l-2-3 1.9-1.4a8 8 0 0 1 0-2L6.6 8.2l2-3 2.2.8a8 8 0 0 1 1.6-1L12.8 2.7h3.6l.4 2.3a8 8 0 0 1 1.6 1l2.2-.8 2 3-1.9 1.4a8 8 0 0 1 0 2L21 12z"/></svg><span>设置</span></div>
+      </div>
+    </div>
+    <div class="sysnav"><span>☰</span><span>□</span><span>◁</span></div>
+  </div>
+</div>
+
+<div class="info">
+  <div class="kicker">仅效果图 · 未改任何代码</div>
+  <h1>银灰渐变，会好点吗？</h1>
+  <p class="lead">「银灰渐变」有两种做法：铺在页面背景上，或者只换掉现在那块深色头卡。下面四个方案可以点着切换，手机里是同一份内容。</p>
+
+  <div class="choices">
+    <button data-go="a">A 现状<small>平浅灰底 + 深色头卡</small></button>
+    <button data-go="b" class="on">B 银灰背景<small>页面铺珠光银灰渐变</small></button>
+    <button data-go="c">C 银灰头卡<small>头卡换亮银金属渐变</small></button>
+    <button data-go="d">D 全银灰<small>背景 + 头卡同色系</small></button>
+  </div>
+
+  <div class="desc">
+    <h3 id="dtitle">B · 银灰背景</h3>
+    <p id="dtext">页面从纯平浅灰换成「左上高光 → 中段银灰 → 底部回亮」的斜向渐变；列表和输入框改成半透明白，让渐变从边缘透出来。深色头卡原样保留，靠明度反差压住第一屏。</p>
+  </div>
+
+  <div class="verdict">
+    <b>我的判断：</b>会有帮助，但别指望它「变漂亮」——现在页面的问题不是底色平，而是列表区一大片白底黑字没有节奏。渐变能带来光影感，属于加分项。<br>
+    最稳的是 <b>B</b>：深色头卡和银灰背景形成明确反差，不容易脏。<b>C</b> 反差最大、最亮眼，但浅色头卡压不住第一屏，会显得轻。<b>D</b> 全套银灰最统一，风险是头卡和背景糊在一起、层次变平。
+  </div>
+
+  <div class="foot">银灰最容易翻车的是「灰蒙蒙显脏」：高光必须够亮、过渡要干净，白卡片要半透明而不是纯白块。<br>看完告诉我选哪个（或都不选），我再动代码。</div>
+</div>
+
+<script>
+  const copy = {
+    a: ['A · 现状', '页面是平的 #F5F6F8，头卡是深灰渐变。作为对照：注意看背景有没有光影、列表区是不是一大片平白。'],
+    b: ['B · 银灰背景', '页面从纯平浅灰换成「左上高光 → 中段银灰 → 底部回亮」的斜向渐变；列表和输入框改成半透明白，让渐变从边缘透出来。深色头卡原样保留，靠明度反差压住第一屏。'],
+    c: ['C · 银灰头卡', '只把深色头卡换成亮银金属渐变（高光 + 深浅过渡 + 细白描边），文字改深色。背景仍是平浅灰。整页一下变轻，但头卡的存在感会弱不少。'],
+    d: ['D · 全银灰', '背景和头卡都用银灰系，头卡比背景稍深一档，靠高光方向区分层次；列表半透明白。最统一，但两块的明度差小，第一屏容易「糊成一片」。']
+  };
+  document.querySelectorAll('button[data-go]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const k = btn.dataset.go;
+      document.body.dataset.scheme = k;
+      document.querySelectorAll('button[data-go]').forEach(b => b.classList.toggle('on', b === btn));
+      document.getElementById('dtitle').textContent = copy[k][0];
+      document.getElementById('dtext').textContent = copy[k][1];
+    });
+  });
+</script>
+</body>
+</html>

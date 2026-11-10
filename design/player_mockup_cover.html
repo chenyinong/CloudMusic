@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>上半部分改版：全出血封面卡片</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background:#1a1d24; color:#e8eaef; font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    padding:36px 24px 60px; display:flex; flex-direction:column; align-items:center; gap:28px;
+  }
+  h1 { font-size:20px; font-weight:600; letter-spacing:.5px; }
+  .compare { display:flex; gap:44px; align-items:flex-start; flex-wrap:wrap; justify-content:center; }
+  .phone-col { display:flex; flex-direction:column; align-items:center; gap:14px; }
+  .tag { font-size:14px; color:#9aa1ad; display:flex; align-items:center; gap:8px; }
+  .tag b { color:#fff; }
+  .pill { padding:3px 12px; border-radius:20px; font-size:12px; }
+  .pill.a { background:linear-gradient(90deg,#6f9b6f,#8fae7e); color:#16241a; font-weight:600; }
+  .pill.b { background:#3a3f4a; }
+
+  .phone { width:400px; height:866px; border-radius:34px; overflow:hidden; position:relative;
+    background:#fbfaf7; box-shadow:0 20px 60px rgba(0,0,0,.55); flex:none; }
+  .statusbar { height:38px; display:flex; align-items:center; justify-content:space-between; padding:0 22px; font-size:12.5px; font-weight:600; color:#111; position:relative; z-index:5; }
+  .sb-right { display:flex; gap:5px; align-items:center; font-size:11px; }
+  .sig { display:inline-flex; gap:1.5px; align-items:flex-end; height:10px; }
+  .sig i { width:2.5px; background:#111; border-radius:1px; display:block; }
+  .bat { width:19px; height:10px; border:1.4px solid #111; border-radius:3px; position:relative; }
+  .bat::after { content:""; position:absolute; inset:1.4px; right:3px; background:#111; border-radius:1px; }
+  .bat::before { content:""; position:absolute; right:-3.4px; top:2.4px; width:2px; height:4px; background:#111; border-radius:0 2px 2px 0; }
+
+  .topbar { display:flex; align-items:center; justify-content:space-between; padding:8px 20px 0; position:relative; z-index:5; }
+  .dots { display:flex; gap:5px; align-items:center; }
+  .dot { width:6px; height:6px; border-radius:3px; background:rgba(0,0,0,.18); }
+  .dot.active { width:15px; background:#111; }
+  .chev, .more-ic { width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#111; }
+  .chev svg, .more-ic svg { width:22px; height:22px; }
+
+  /* ── 封面卡片区 ── */
+  .cover-zone { flex:1; display:flex; align-items:center; justify-content:center; padding:0 30px; position:relative; z-index:2; }
+  .cover-card { width:100%; aspect-ratio:1/1; border-radius:24px; overflow:hidden; position:relative;
+    box-shadow:0 26px 50px -18px rgba(70,90,70,.45), 0 4px 14px rgba(0,0,0,.06); }
+  .cover-card svg.art { position:absolute; inset:0; width:100%; height:100%; display:block; }
+  .ovl { position:absolute; color:#fff; z-index:2; }
+  .ovl.tl { top:20px; left:22px; font-size:10.5px; letter-spacing:2.5px; font-weight:600; opacity:.92; }
+  .ovl.bl { bottom:20px; left:22px; font-size:19px; letter-spacing:4px; font-weight:500; font-family:Georgia,"Times New Roman",serif; opacity:.95; }
+  .ovl.br { bottom:20px; right:22px; font-size:11px; letter-spacing:2px; font-weight:600; opacity:.9; }
+  .cover-card::after { content:""; position:absolute; inset:0; z-index:1;
+    background:linear-gradient(180deg, rgba(0,0,0,.10) 0%, transparent 22%, transparent 70%, rgba(0,0,0,.22) 100%); }
+
+  /* 无封面版：程序化生成的装饰封面 */
+  .cover-card.gen { background:linear-gradient(160deg,#2e5348 0%, #4a7a5e 34%, #8aa878 68%, #d9c9a8 100%); }
+  .cover-card.gen .rings { position:absolute; top:12%; right:10%; width:150px; height:150px; border-radius:50%;
+    background:radial-gradient(circle at 40% 36%, #f5eec2 0%, #e8dd9e 55%, rgba(232,221,158,0) 72%);
+    box-shadow:0 0 60px 22px rgba(245,238,194,.35); }
+  .cover-card.gen .hill { position:absolute; border-radius:50% 50% 0 0 / 100% 100% 0 0; }
+
+  /* ── 歌曲信息 ── */
+  .songinfo { padding:6px 32px 0; position:relative; z-index:5; }
+  .meta { font-size:11.5px; color:#9aa4a0; letter-spacing:.5px; display:flex; align-items:center; gap:7px; }
+  .meta .sep { width:3px; height:3px; border-radius:50%; background:#c4ccc8; }
+  .titlerow { display:flex; align-items:flex-start; justify-content:space-between; margin-top:8px; }
+  .songtitle { font-size:22px; font-weight:800; color:#141414; letter-spacing:.3px; line-height:1.25; }
+  .heart { width:32px; height:32px; display:flex; align-items:center; justify-content:center; flex:none; margin-top:3px; }
+  .heart svg { width:23px; height:23px; color:#a9b3ae; }
+  .artist { font-size:13.5px; color:#6f7d77; margin-top:5px; }
+  .album { font-size:12px; color:#a5aea9; margin-top:5px; }
+
+  /* ── 下半部分保持现状 ── */
+  .funbar { display:flex; justify-content:space-between; padding:18px 26px 0; position:relative; z-index:5; }
+  .fun-item { display:flex; flex-direction:column; align-items:center; gap:6px; color:#111; font-size:11px; width:52px; }
+  .fun-item svg { width:22px; height:22px; }
+  .progress { padding:14px 26px 0; position:relative; z-index:5; }
+  .pbar { position:relative; height:14px; display:flex; align-items:center; }
+  .ptrack { width:100%; height:2.5px; border-radius:2px; background:rgba(0,0,0,.22); position:relative; }
+  .pfill { position:absolute; left:0; top:0; height:100%; border-radius:2px; background:#111; }
+  .pknob { position:absolute; top:50%; width:10px; height:10px; border-radius:50%; background:#111; transform:translate(-50%,-50%); }
+  .ptimes { display:flex; justify-content:space-between; font-size:11px; color:#8a9aa2; margin-top:2px; }
+  .ctrlbar { display:flex; align-items:center; justify-content:space-between; padding:14px 34px 30px; position:relative; z-index:5; }
+  .ctrl { width:42px; height:42px; display:flex; align-items:center; justify-content:center; color:#111; }
+  .ctrl svg { width:22px; height:22px; }
+  .ctrl.skip svg { width:30px; height:30px; }
+  .playbtn { width:68px; height:68px; border-radius:50%; display:flex; align-items:center; justify-content:center; background:#111; color:#fff; }
+  .playbtn svg { width:30px; height:30px; }
+
+  .notes { max-width:920px; width:100%; }
+  .notes h2 { font-size:16px; margin-bottom:14px; color:#fff; }
+  .note-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; }
+  .note { background:#23272f; border:1px solid #2e333d; border-radius:12px; padding:14px 16px; font-size:13px; line-height:1.7; color:#c3c9d4; }
+  .note b { color:#8fd48f; font-weight:600; }
+  .note .n { color:#8b93a1; font-size:11px; margin-right:8px; }
+</style>
+</head>
+<body>
+<h1>上半部分改版：全出血封面卡片（下半部分保持现状）</h1>
+
+<div class="compare">
+  <!-- ════ 方案 A：有真封面 ════ -->
+  <div class="phone-col">
+    <div class="tag"><span class="pill a">方案 A · 有封面图</span></div>
+    <div class="phone">
+      <div class="statusbar">
+        <span>18:39</span>
+        <span class="sb-right">
+          <span class="sig"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:10px"></i></span>
+          <span>23.0 KB/s</span><span class="bat"></span><span>6</span>
+        </span>
+      </div>
+      <div class="topbar">
+        <div class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></div>
+        <div class="dots"><span class="dot active"></span><span class="dot"></span></div>
+        <div class="more-ic"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></div>
+      </div>
+      <div class="cover-zone">
+        <div class="cover-card">
+          <svg class="art" viewBox="0 0 340 340" preserveAspectRatio="xMidYMid slice">
+            <rect width="340" height="340" fill="#7e9578"/>
+            <circle cx="228" cy="96" r="52" fill="#e9e2ae" opacity=".95"/>
+            <circle cx="228" cy="96" r="70" fill="#e9e2ae" opacity=".18"/>
+            <path d="M0 340 L0 240 Q60 190 120 230 T340 250 L340 340 Z" fill="#4d6b52"/>
+            <path d="M60 340 Q100 180 150 150 Q160 260 190 340 Z" fill="#5f8560"/>
+            <path d="M150 340 Q220 130 280 170 Q300 260 320 340 Z" fill="#6f9b6f"/>
+            <circle cx="196" cy="152" r="5" fill="#d6e34e"/>
+            <rect width="340" height="340" fill="url(#g)" opacity="0"/>
+            <defs><radialGradient id="g"><stop offset="60%" stop-color="transparent"/><stop offset="100%" stop-color="#000" stop-opacity=".12"/></radialGradient></defs>
+          </svg>
+          <div class="ovl tl">STUDIO SESSION · 2024</div>
+          <div class="ovl bl">SLOW DAYS</div>
+          <div class="ovl br">SIDE A — 01</div>
+        </div>
+      </div>
+      <div class="songinfo">
+        <div class="meta"><span>独立流行</span><span class="sep"></span><span>今日推荐</span></div>
+        <div class="titlerow">
+          <span class="songtitle">我好想你 (苏打绿版)</span>
+          <span class="heart"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s-7.5-4.6-10-9.2C.4 8.6 2.2 5 5.7 5c2 0 3.4 1.1 4.3 2.5h4c.9-1.4 2.3-2.5 4.3-2.5 3.5 0 5.3 3.6 3.7 6.8C19.5 16.4 12 21 12 21z" transform="scale(.9) translate(1.3,1.3)"/></svg></span>
+        </div>
+        <div class="artist">苏打绿</div>
+        <div class="album">《秋：故事》 · 2013</div>
+      </div>
+      <div class="funbar">
+        <div class="fun-item"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h5v2H6v2h12v-2h-2v-2h5a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 13H3V5h18v11z"/></svg>投屏</div>
+        <div class="fun-item"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 3H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-2h-2v2H5V5h9v2h2V5a2 2 0 0 0-2-2zm2 6 4 3-4 3v-2h-3v-2h3V9zm-9 3h5v2H7v-2z"/></svg>歌词</div>
+        <div class="fun-item"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>信息</div>
+        <div class="fun-item"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-1.7-1L15 3.5h-4l-.3 2.5a7.5 7.5 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.5 7.5 0 0 0 1.7 1l.3 2.5h4l.3-2.5a7.5 7.5 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1,-1)"/></svg>设置</div>
+        <div class="fun-item"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>更多</div>
+      </div>
+      <div class="progress">
+        <div class="pbar"><div class="ptrack"><div class="pfill" style="width:1%"></div><div class="pknob" style="left:1%"></div></div></div>
+        <div class="ptimes"><span>00:02</span><span>05:29</span></div>
+      </div>
+      <div class="ctrlbar">
+        <div class="ctrl"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg></div>
+        <div class="ctrl skip"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6L18 6v12z"/></svg></div>
+        <div class="playbtn"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg></div>
+        <div class="ctrl skip"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg></div>
+        <div class="ctrl"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zm14-6v3.1a4 4 0 1 0 2 3.4V8h-2v2z"/></svg></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ 方案 B：无封面，程序生成 ════ -->
+  <div class="phone-col">
+    <div class="tag"><span class="pill b">方案 B · 无封面时程序生成占位</span></div>
+    <div class="phone">
+      <div class="statusbar">
+        <span>18:39</span>
+        <span class="sb-right">
+          <span class="sig"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:10px"></i></span>
+          <span>23.0 KB/s</span><span class="bat"></span><span>6</span>
+        </span>
+      </div>
+      <div class="topbar">
+        <div class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></div>
+        <div class="dots"><span class="dot active"></span><span class="dot"></span></div>
+        <div class="more-ic"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></div>
+      </div>
+      <div class="cover-zone">
+        <div class="cover-card gen">
+          <div class="rings"></div>
+          <div class="hill" style="left:-30%; bottom:-42%; width:90%; height:80%; background:#33523f; opacity:.85;"></div>
+          <div class="hill" style="left:18%; bottom:-52%; width:80%; height:85%; background:#48684f;"></div>
+          <div class="hill" style="right:-25%; bottom:-45%; width:85%; height:75%; background:#5b7f5c;"></div>
+          <div class="ovl tl">网盘直连 · 原音质</div>
+          <div class="ovl bl">苏打绿</div>
+          <div class="ovl br">01 / 12</div>
+        </div>
+      </div>
+      <div class="songinfo">
+        <div class="meta"><span>网盘直连</span><span class="sep"></span><span>原音质</span></div>
+        <div class="titlerow">
+          <span class="songtitle">我好想你 (苏打绿版)</span>
+          <span class="heart"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s-7.5-4.6-10-9.2C.4 8.6 2.2 5 5.7 5c2 0 3.4 1.1 4.3 2.5h4c.9-1.4 2.3-2.5 4.3-2.5 3.5 0 5.3 3.6 3.7 6.8C19.5 16.4 12 21 12 21z" transform="scale(.9) translate(1.3,1.3)"/></svg></span>
+        </div>
+        <div class="artist">苏打绿</div>
+        <div class="album">TeaDropppp 喜欢的音乐</div>
+      </div>
+      <div class="funbar">
+        <div class="fun-item"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h5v2H6v2h12v-2h-2v-2h5a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 13H3V5h18v11z"/></svg>投屏</div>
+        <div class="fun-item"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 3H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-2h-2v2H5V5h9v2h2V5a2 2 0 0 0-2-2zm2 6 4 3-4 3v-2h-3v-2h3V9zm-9 3h5v2H7v-2z"/></svg>歌词</div>
+        <div class="fun-item"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>信息</div>
+        <div class="fun-item"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-1.7-1L15 3.5h-4l-.3 2.5a7.5 7.5 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.5 7.5 0 0 0 1.7 1l.3 2.5h4l.3-2.5a7.5 7.5 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1,-1)"/></svg>设置</div>
+        <div class="fun-item"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>更多</div>
+      </div>
+      <div class="progress">
+        <div class="pbar"><div class="ptrack"><div class="pfill" style="width:1%"></div><div class="pknob" style="left:1%"></div></div></div>
+        <div class="ptimes"><span>00:02</span><span>05:29</span></div>
+      </div>
+      <div class="ctrlbar">
+        <div class="ctrl"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg></div>
+        <div class="ctrl skip"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6L18 6v12z"/></svg></div>
+        <div class="playbtn"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg></div>
+        <div class="ctrl skip"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg></div>
+        <div class="ctrl"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zm14-6v3.1a4 4 0 1 0 2 3.4V8h-2v2z"/></svg></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="notes">
+  <h2>说明与可行性</h2>
+  <div class="note-grid">
+    <div class="note"><span class="n">结论</span><b>能做到</b>，纯 Compose 改 <code>DiscPage</code> 即可：白色卡片内的黑胶/唱臂删掉，换成一张全出血的圆角方形封面图 + 上下两角 overlay 文字，不涉及任何播放逻辑。</div>
+    <div class="note"><span class="n">前提</span>目前数据层<b>没有封面图字段</b>（黑胶中心就是渐变占位圆）。要真封面得先从网盘接口补封面 URL 数据；没有封面就走方案 B。</div>
+    <div class="note"><span class="n">方案 B</span>无封面时用「歌名哈希选色 + Canvas 画几何装饰（渐变天空/山丘/圆日）」程序化生成一张像专辑封面的图，每次颜色构图略有不同，风格统一。</div>
+    <div class="note"><span class="n">文字映射</span>左上=来源/音质（网盘直连·原音质）、左下=歌手或封面标题、右下=曲目序号（如 01/12）；下方信息区保留现状的 歌名/歌手/喜欢，仅把原来的灰色胶囊换成小字 meta 行。</div>
+  </div>
+</div>
+</body>
+</html>

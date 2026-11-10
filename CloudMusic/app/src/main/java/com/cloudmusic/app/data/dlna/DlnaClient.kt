@@ -56,6 +56,7 @@ class DlnaClient(private val context: Context? = null) {
     fun discover(timeoutMs: Long = 4000): List<DlnaDevice> {
         val locations = linkedSetOf<String>()
         val lock = acquireMulticastLock()
+        Log.d(TAG, "discover 开始 timeout=$timeoutMs 多播锁=${lock != null}")
         try {
             MulticastSocket(null).use { socket ->
                 socket.reuseAddress = true
@@ -80,6 +81,7 @@ class DlnaClient(private val context: Context? = null) {
                     append("\r\n")
                 }.toByteArray(Charsets.UTF_8)
                 socket.send(DatagramPacket(query, query.size, group, PORT))
+                Log.d(TAG, "已发出 M-SEARCH")
 
                 val deadline = System.currentTimeMillis() + timeoutMs
                 val buf = ByteArray(4096)
@@ -90,6 +92,7 @@ class DlnaClient(private val context: Context? = null) {
                     } catch (e: SocketTimeoutException) {
                         continue
                     } catch (e: Exception) {
+                        Log.w(TAG, "接收异常中断：${e.message}")
                         break
                     }
                     val text = String(packet.data, packet.offset, packet.length, Charsets.ISO_8859_1)
@@ -97,6 +100,7 @@ class DlnaClient(private val context: Context? = null) {
                     val st = headerOf(text, "ST") ?: continue
                     if (!st.contains("MediaRenderer", ignoreCase = true)) continue
                     val location = headerOf(text, "LOCATION") ?: continue
+                    Log.d(TAG, "收到渲染器回复 location=$location")
                     if (location.isNotBlank()) locations.add(location.trim())
                 }
             }
@@ -106,7 +110,10 @@ class DlnaClient(private val context: Context? = null) {
             lock?.release()
         }
 
-        return locations.mapNotNull { describe(it) }.distinctBy { it.udn }
+        Log.d(TAG, "discover 结束：location 数=${locations.size}")
+        return locations.mapNotNull { u ->
+            describe(u).also { if (it == null) Log.w(TAG, "describe 解析失败：$u") }
+        }.distinctBy { it.udn }
     }
 
     /**

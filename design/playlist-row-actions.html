@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>歌单列表 · 行操作区设计对比</title>
+<style>
+  :root{
+    --ink:#23272e; --ink2:#5c636d; --ink3:#9aa1aa;
+    --page:#f5f6f8; --card:#fff; --line:#e8eaee; --field:#eceef1;
+    --primary:#23272e; --onprimary:#fff; --soft:#eef0f3; --danger:#c0392b;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:linear-gradient(160deg,#eef0f3 0%,#e4e8ed 55%,#f2f4f6 100%);
+    color:var(--ink); min-height:100vh;
+    font-family:"PingFang SC","Microsoft YaHei","Segoe UI",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:36px 28px 56px}
+  .head{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;flex-wrap:wrap;margin-bottom:26px}
+  h1{font-size:23px;margin:0 0 8px;letter-spacing:.4px}
+  .head p{margin:0;color:var(--ink2);font-size:13px;line-height:1.7;max-width:620px}
+  .switch{display:flex;gap:8px;flex-wrap:wrap}
+  .switch button{
+    border:1px solid #d5d9df;background:rgba(255,255,255,.72);color:var(--ink2);
+    padding:9px 15px;border-radius:11px;font-size:13px;cursor:pointer;
+    transition:.18s;font-family:inherit;
+  }
+  .switch button:hover{border-color:#aab1ba;color:var(--ink)}
+  .switch button.on{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:700;box-shadow:0 4px 12px rgba(35,39,46,.18)}
+  .stage{display:flex;gap:34px;align-items:flex-start;flex-wrap:wrap}
+
+  /* ---------- 手机 ---------- */
+  .phone{
+    width:372px;flex:0 0 372px;height:790px;background:var(--page);
+    border-radius:34px;overflow:hidden;position:relative;
+    box-shadow:0 26px 60px rgba(30,36,45,.20),0 2px 8px rgba(30,36,45,.10);
+    border:7px solid #1d2127;display:flex;flex-direction:column;
+  }
+  .status{height:30px;flex:0 0 30px;display:flex;align-items:center;justify-content:space-between;
+    padding:0 20px;font-size:11px;font-weight:600;color:var(--ink)}
+  .topbar{height:50px;flex:0 0 50px;display:flex;align-items:center;justify-content:space-between;
+    padding:0 14px;font-size:15px;font-weight:600}
+  .topbar .ic{font-size:19px;color:var(--ink2);width:26px;text-align:center}
+  .scroll{flex:1;overflow:hidden;position:relative}
+  .scroll-inner{height:100%;overflow-y:auto;scrollbar-width:none}
+  .scroll-inner::-webkit-scrollbar{display:none}
+
+  .pl-head{display:flex;gap:14px;padding:8px 16px 14px;align-items:center}
+  .cover{width:78px;height:78px;border-radius:15px;flex:0 0 78px;
+    background:linear-gradient(135deg,#3d444e,#23272e 70%);position:relative;overflow:hidden}
+  .cover:after{content:"";position:absolute;width:62px;height:62px;border-radius:50%;
+    border:8px solid rgba(255,255,255,.13);right:-16px;bottom:-18px}
+  .pl-info{flex:1;min-width:0}
+  .pl-name{font-size:17px;font-weight:700;margin:0 0 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pl-sub{font-size:11.5px;color:var(--ink2);line-height:1.7}
+  .pl-edit{display:inline-block;margin-top:7px;border:1px solid #d7dbe0;border-radius:8px;
+    padding:3px 9px;font-size:10.5px;color:var(--ink2);background:rgba(255,255,255,.65)}
+
+  .search{position:sticky;top:0;z-index:2;background:var(--page);padding:5px 16px 10px}
+  .field{height:36px;border-radius:19px;background:var(--field);display:flex;align-items:center;
+    gap:8px;padding:0 13px;font-size:12px;color:var(--ink3)}
+  .playall{display:flex;align-items:center;gap:10px;padding:8px 16px 10px}
+  .playall .disc{width:30px;height:30px;border-radius:50%;background:var(--primary);
+    color:#fff;display:grid;place-items:center;font-size:12px}
+  .playall b{font-size:13px;display:block}
+  .playall small{font-size:10.5px;color:var(--ink2)}
+  .msg{padding:0 16px 6px;font-size:10.5px;color:var(--ink2)}
+
+  .songs{background:transparent;padding:0 0 90px}
+  .row{display:flex;align-items:center;min-height:60px;padding:8px 16px;gap:8px;
+    border-bottom:1px solid rgba(150,158,168,.10)}
+  .idx{width:28px;flex:0 0 28px;text-align:center;font-size:11.5px;color:var(--ink3)}
+  .idx .eq{display:none;gap:2px;align-items:flex-end;justify-content:center;height:14px}
+  .idx .eq b{width:2.5px;background:var(--primary);border-radius:2px;height:6px}
+  .idx .eq b:nth-child(2){height:13px}
+  .idx .eq b:nth-child(3){height:9px}
+  body[data-scheme="b"] .row.isplay .idx .num{display:none}
+  body[data-scheme="b"] .row.isplay .idx .eq{display:flex}
+  .meta{flex:1;min-width:0}
+  .t{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5}
+  .row.isplay .t{color:var(--primary);font-weight:700}
+  .s{font-size:11px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+  .fail-line{font-size:10.5px;color:var(--danger);margin-top:3px;display:flex;align-items:center;gap:6px}
+  .fail-line em{font-style:normal;color:var(--ink2);text-decoration:underline}
+  .ops{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+  .round{width:28px;height:28px;border-radius:50%;background:var(--soft);color:var(--ink2);
+    display:grid;place-items:center;font-size:11px}
+  .pill{height:30px;padding:0 14px;border-radius:15px;display:grid;place-items:center;
+    font-size:11.5px;font-weight:600;letter-spacing:.3px}
+  .pill.dark{background:var(--primary);color:var(--onprimary)}
+  .pill.soft{background:var(--soft);color:var(--ink2);font-weight:500}
+  .ico{width:30px;height:30px;border-radius:50%;color:var(--ink2);
+    display:grid;place-items:center;background:rgba(35,39,46,.055);
+    border:1px solid rgba(35,39,46,.07)}
+  .ico svg{display:block}
+  .icon-switch{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px;align-items:center;
+    justify-content:flex-end}
+  .icon-switch em{font-size:11px;color:var(--ink2);font-style:normal;margin-right:2px}
+  .icon-switch button{border:1px solid #d5d9df;background:rgba(255,255,255,.72);
+    color:var(--ink2);padding:7px 11px;border-radius:10px;font-size:12px;cursor:pointer;
+    display:flex;align-items:center;gap:6px;font-family:inherit;transition:.18s}
+  .icon-switch button svg{width:15px;height:15px}
+  .icon-switch button.on{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:600}
+  body:not([data-scheme="b"]) .icon-switch{display:none}
+  .text{font-size:11.5px;color:var(--ink2);padding:6px 2px}
+  .busy{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink2)}
+  .busy i{width:13px;height:13px;border:2px solid #cfd4da;border-top-color:var(--primary);
+    border-radius:50%;display:inline-block;animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  .minibar{position:absolute;left:10px;right:10px;bottom:56px;height:52px;border-radius:15px;
+    background:#2b3038;color:#fff;display:flex;align-items:center;gap:10px;padding:0 12px;
+    box-shadow:0 8px 22px rgba(25,30,38,.28)}
+  .minibar .mc{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#6c7683,#404751)}
+  .minibar .mt{flex:1;min-width:0;font-size:11.5px;line-height:1.5}
+  .minibar .mt small{display:block;color:#b9c0c9;font-size:10px}
+  .minibar .mb{font-size:16px;color:#fff;padding:0 4px}
+  .tabbar{height:52px;flex:0 0 52px;background:rgba(255,255,255,.94);border-top:1px solid var(--line);
+    display:flex;align-items:center;justify-content:space-around;font-size:10px;color:var(--ink3)}
+  .tabbar .on{color:var(--ink);font-weight:700}
+
+  /* ---------- 说明 ---------- */
+  .notes{flex:1;min-width:320px;max-width:560px}
+  .badge{display:inline-block;font-size:11px;letter-spacing:1px;color:var(--ink2);
+    border:1px solid #cfd4da;border-radius:20px;padding:4px 11px;margin-bottom:14px}
+  .notes h2{font-size:20px;margin:0 0 6px}
+  .notes .lead{font-size:13px;color:var(--ink2);line-height:1.8;margin:0 0 18px}
+  .card{background:rgba(255,255,255,.78);border:1px solid rgba(255,255,255,.9);
+    border-radius:16px;padding:16px 18px;margin-bottom:12px;box-shadow:0 3px 14px rgba(35,40,50,.06)}
+  .card h3{font-size:13px;margin:0 0 8px;display:flex;align-items:center;gap:8px}
+  .card h3 span{width:6px;height:6px;border-radius:50%;background:var(--primary)}
+  .card p{font-size:12.5px;color:var(--ink2);line-height:1.85;margin:0}
+  .card p + p{margin-top:8px}
+  .verdict{background:var(--primary);color:#fff;border:none}
+  .verdict h3 span{background:#fff}
+  .verdict p{color:#dfe3e8}
+  .verdict strong{color:#fff}
+  .foot{margin-top:20px;font-size:12px;color:var(--ink2);line-height:1.8}
+</style>
+</head>
+<body data-scheme="b">
+
+<div class="wrap">
+  <div class="head">
+    <div>
+      <h1>歌单列表 · 行操作区设计对比</h1>
+      <p>问题：未导入的行右侧同时有「灰色圆形 ▶」和「黑色导入胶囊」，形状、颜色、重量都不统一；已导入的行却只有一个胶囊。点一下按钮，再点一下按钮，视觉上像两排工具栏。</p>
+    </div>
+    <div>
+      <div class="switch">
+        <button data-k="a">A 现状</button>
+        <button data-k="b">B 单图标 · 推荐</button>
+        <button data-k="c">C 单胶囊</button>
+        <button data-k="d">D 纯文字</button>
+      </div>
+      <div class="icon-switch" id="iconSwitch"></div>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>▮▮▮ &nbsp;▰</span></div>
+      <div class="topbar"><span class="ic">‹</span><span>方大同 · 精选</span><span class="ic">⌫</span></div>
+      <div class="scroll">
+        <div class="scroll-inner">
+          <div class="pl-head">
+            <div class="cover"></div>
+            <div class="pl-info">
+              <div class="pl-name">方大同 · 精选</div>
+              <div class="pl-sub">网易云歌单 · 42 首<br>已导入 12 首 · 存到坚果云</div>
+              <span class="pl-edit">改网盘和目录</span>
+            </div>
+          </div>
+          <div class="search"><div class="field">⌕ &nbsp;在这张歌单里找</div></div>
+          <div class="playall">
+            <div class="disc">▶</div>
+            <div><b>播放全部</b><small>12 首已经导进网盘 · 按顺序连着放</small></div>
+          </div>
+          <div class="msg" id="msg">在线播放《春风吹》· 夸克完整版 · 再点一次停止</div>
+          <div class="songs" id="songs"></div>
+        </div>
+      </div>
+      <div class="minibar">
+        <div class="mc"></div>
+        <div class="mt">春风吹<small>方大同 · 在线播放中</small></div>
+        <div class="mb">❚❚</div><div class="mb">›</div>
+      </div>
+      <div class="tabbar"><span>搜歌</span><span class="on">我的</span><span>歌单</span><span>设置</span></div>
+    </div>
+
+    <div class="notes" id="notes"></div>
+  </div>
+
+  <div class="foot">只是静态设计稿，App 代码一行没动。看完告诉我选哪个（或都不选），我再改代码。</div>
+</div>
+
+<script>
+const rows = [
+  { n:1, t:'三人游',        s:'方大同 · 4:12', st:'playing' },
+  { n:2, t:'爱爱爱',        s:'方大同 · 3:48', st:'play'    },
+  { n:3, t:'Soul Boy',      s:'方大同 · 4:02', st:'import'  },
+  { n:4, t:'春风吹',        s:'方大同 · 3:36', st:'online'  },
+  { n:5, t:'Love Song',     s:'方大同 · 4:20', st:'busy'    },
+  { n:6, t:'好不容易',      s:'方大同 · 4:41', st:'failed'  },
+  { n:7, t:'每个人都会',    s:'方大同 · 3:59', st:'import'  },
+];
+
+const P = (txt, cls='dark') => `<span class="pill ${cls}">${txt}</span>`;
+const R = txt => `<span class="round">${txt}</span>`;
+const I = html => `<span class="ico">${html}</span>`;
+const T = txt => `<span class="text">${txt}</span>`;
+const BUSY = `<span class="busy"><i></i>上传中 62%</span>`;
+
+// 统一的线性图标：1.7px 描边、圆头圆角，和 Material 线性图标同一套语言。
+// 不再用字符 ↓ —— 字符的粗细跟着字体走，放大缩小都不稳，语义也弱。
+const SVG = body => `<svg viewBox="0 0 24 24" width="16" height="16" fill="none"
+  stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
+  stroke-linejoin="round">${body}</svg>`;
+const STOP = SVG(`<rect x="7" y="7" width="10" height="10" rx="2"/>`);
+
+const ICONS = {
+  tray: { label:'下载入托盘', svg: SVG(
+    `<path d="M12 3.6v10.1"/><path d="M8.3 10.2 12 13.9l3.7-3.7"/>
+     <path d="M4.8 16.6v2.1a1.8 1.8 0 0 0 1.8 1.8h10.8a1.8 1.8 0 0 0 1.8-1.8v-2.1"/>`) },
+  cloud: { label:'传到网盘', svg: SVG(
+    `<path d="M7.4 18.3h9.2a3.4 3.4 0 0 0 .4-6.8 5 5 0 0 0-9.6-1.1 3.5 3.5 0 0 0 0 7.9Z"/>
+     <path d="M12 20.4v-7.9"/><path d="M9.6 15 12 12.5l2.4 2.5"/>`) },
+  note: { label:'加入曲库', svg: SVG(
+    `<path d="M9.4 16.6V6.2l7.4-1.7v9.2"/>
+     <ellipse cx="7.2" cy="17" rx="2.2" ry="1.8"/>
+     <ellipse cx="14.6" cy="14.3" rx="2.2" ry="1.8"/>
+     <path d="M18.4 15.4v6M15.4 18.4h6"/>`) },
+  folder: { label:'收进歌单', svg: SVG(
+    `<path d="M3.6 7.7A1.6 1.6 0 0 1 5.2 6.1h3.9l1.9 2h7.8a1.6 1.6 0 0 1 1.6 1.6v8.2a1.6 1.6 0 0 1-1.6 1.6H5.2a1.6 1.6 0 0 1-1.6-1.6Z"/>
+     <path d="M12 11.3v6M9 14.3h6"/>`) },
+};
+let iconKind = 'tray';
+function ops(scheme, st){
+  if (st === 'busy')   return BUSY;
+  if (st === 'failed') return '';
+  if (scheme === 'a') {
+    if (st === 'playing') return P('播放中');
+    if (st === 'play')    return P('播放');
+    if (st === 'online')  return R('✕') + P('导入');
+    return R('▶') + P('导入');
+  }
+  if (scheme === 'b') {
+    // 整行点击就是播放，右侧只留一个轻量次操作
+    if (st === 'online')  return I(STOP);
+    if (st === 'import')  return I(ICONS[iconKind].svg);
+    return '';
+  }
+  if (scheme === 'c') {
+    if (st === 'playing') return P('播放中');
+    if (st === 'play')    return P('播放');
+    if (st === 'online')  return P('停止','soft');
+    return P('导入','soft');
+  }
+  // d：纯文字，无底色无图标
+  if (st === 'playing') return T('播放中');
+  if (st === 'play')    return T('播放');
+  if (st === 'online')  return T('停止');
+  return T('导入');
+}
+
+const NOTES = {
+  a: {
+    badge:'A · 现状（对照组）',
+    title:'两个按钮并排，确实不协调',
+    lead:'未导入行：灰圆 ▶ + 黑「导入」胶囊；已导入行：只有黑「播放」胶囊。同一个列表里控件数量和视觉语言都不一致。',
+    cards:[
+      ['问题在哪','圆形和胶囊是两套形状；一个是浅灰无字图标、一个是实底黑带字，重量差太远。两个都像「按钮」，用户不知道哪个才是主操作。'],
+      ['还有一层','现在整行点击已经是「播放」了，右侧再放一个 ▶ 图标，等于同一个动作有两个入口，纯属重复。'],
+    ],
+    verdict:'这一版只是对照，不建议保留。'
+  },
+  b: {
+    badge:'B · 单图标（推荐）',
+    title:'减法：一行最多一个图标',
+    lead:'既然整行点击就是播放，播放就不需要按钮。右侧只保留一个 30dp 的淡圆图标，作为「次操作」：未导入是导入图标、在线播放中是停止图标；已导入的行右侧干脆留空。',
+    cards:[
+      ['播放状态挪到左侧','正在播（含在线播）时，左侧序号位换成三根均衡器条，歌名变主色加粗。这是音乐 App 的通用语言，比再塞一个按钮更安静，也顺手解决了「在线播没有明显状态」的问题。'],
+      ['为什么导入用图标','导入是低频、且会占网盘空间的操作，不该和「播放」抢视觉重量。一个淡圆图标比黑胶囊轻得多，但仍在行内、一点就到。'],
+      ['导入图标精修','字符 ↓ 的粗细跟着字体走，缩放都不稳，语义也只是「下载」。现在换成 1.7px 线性 SVG（圆头圆角，和 Material 线性图标同一套语言），圆底从描边白改成极淡中性灰；在线播放的 ■ 也一并换成线性圆角方块。四个候选在下方，默认「下载入托盘」。'],
+      ['改动量','去掉圆形 ▶ 按钮；胶囊换成图标；序号位加一个播放指示。只动歌单详情页这一处布局，逻辑不用改。'],
+    ],
+    verdict:'最推荐：控件数量最少、状态最清楚、和「点行即播放」的新行为完全自洽。唯一取舍是导入入口变小了，但仍在原位置。'
+  },
+  c: {
+    badge:'C · 单胶囊（最小改动）',
+    title:'只保留胶囊，删掉圆图标',
+    lead:'每行仍只有一个控件：已导入是实底黑「播放」，未导入改成淡灰「导入」，在线播放中显示「停止」。形状语言统一，改动最小。',
+    cards:[
+      ['好处','不引入新元素，只删圆图标 + 把「导入」从实底黑降成淡灰，风险最低，回退也最容易。'],
+      ['不足','胶囊仍然比较重，未导入的行右侧还是一块明显的色块；播放状态只能靠胶囊文字表达，扫一眼不如左侧均衡器直观。'],
+    ],
+    verdict:'如果你只想快速去掉那个不协调的圆图标，选这个就够了；想要「高级一点」还是 B。'
+  },
+  d: {
+    badge:'D · 纯文字（最轻）',
+    title:'右侧只剩一个小字',
+    lead:'去掉所有底色和图标，右侧只有「播放 / 导入 / 停止」几个淡灰小字，列表彻底安静下来。',
+    cards:[
+      ['好处','视觉最干净，歌名和歌手是绝对主角，长歌名能多出约 40dp 空间。'],
+      ['代价','可点区域变小，导入这种操作容易点不中；状态反馈也偏弱，暗色模式下淡灰字对比度要额外调。'],
+    ],
+    verdict:'好看但偏激进，属于「设计稿好看、上手略虚」的一档，不优先建议。'
+  },
+};
+
+const ICON_NOTES = {
+  tray:  ['下载入托盘 · 推荐','最标准的「保存到网盘」语义，箭头 + 托盘一眼能认。1.7px 线性描边比字符 ↓ 精致得多，也不会被误认成「展开」。'],
+  cloud: ['传到网盘','更贴合 App 里「下载后上传到你自己的网盘」这个真实流程，但云朵笔画偏多，30dp 里略挤。'],
+  note:  ['加入曲库','音符 + 加号，语义最贴音乐场景；缺点是 16px 下信息密度偏高，小屏容易糊。'],
+  folder:['收进歌单','文件夹 + 加号，偏「归档」语义，和「下载文件」这个动作有点距离。'],
+};
+
+function render(){
+  const k = document.body.dataset.scheme;
+  document.querySelectorAll('.switch button').forEach(b =>
+    b.classList.toggle('on', b.dataset.k === k));
+
+  document.getElementById('iconSwitch').innerHTML =
+    `<em>导入图标</em>` + Object.entries(ICONS).map(([id, v]) =>
+      `<button data-i="${id}" class="${id === iconKind ? 'on' : ''}">${v.svg}${v.label}</button>`
+    ).join('');
+  document.querySelectorAll('#iconSwitch button').forEach(b =>
+    b.addEventListener('click', () => { iconKind = b.dataset.i; render(); }));
+
+  document.getElementById('songs').innerHTML = rows.map(r => {
+    const playing = (r.st === 'playing' || r.st === 'online');
+    return `<div class="row ${playing ? 'isplay' : ''}">
+      <div class="idx"><span class="num">${r.n}</span><i class="eq"><b></b><b></b><b></b></i></div>
+      <div class="meta">
+        <div class="t">${r.t}</div>
+        <div class="s">${r.s}</div>
+        ${r.st === 'failed'
+          ? `<div class="fail-line">所有音源都找不到这首<em>去别处找 ↗</em></div>`
+          : ''}
+      </div>
+      <div class="ops">${ops(k, r.st)}</div>
+    </div>`;
+  }).join('');
+
+  const n = NOTES[k];
+  const ic = ICON_NOTES[iconKind];
+  const iconCard = k === 'b'
+    ? `<div class="card"><h3><span></span>${ic[0]}</h3><p>${ic[1]}</p></div>`
+    : '';
+  document.getElementById('notes').innerHTML =
+    `<div class="badge">${n.badge}</div>
+     <h2>${n.title}</h2>
+     <p class="lead">${n.lead}</p>` +
+    n.cards.map(c => `<div class="card"><h3><span></span>${c[0]}</h3><p>${c[1]}</p></div>`).join('') +
+    iconCard +
+    `<div class="card verdict"><h3><span></span>我的判断</h3><p><strong>${n.verdict}</strong></p></div>`;
+
+  document.getElementById('msg').textContent = (k === 'a')
+    ? '在线播放《春风吹》· 夸克完整版 · 再点一次停止'
+    : (k === 'b' ? '在线播放《春风吹》· 夸克完整版 · 点右侧停止' : '在线播放《春风吹》· 夸克完整版');
+}
+
+document.querySelectorAll('.switch button').forEach(b =>
+  b.addEventListener('click', () => {
+    document.body.dataset.scheme = b.dataset.k;
+    render();
+  }));
+render();
+</script>
+</body>
+</html>

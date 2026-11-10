@@ -161,7 +161,7 @@ fun DavEntry.toTrack(url: String, providerId: String = ProviderKind.WEBDAV.id): 
         folder = parent,
         size = size,
         mime = mime,
-        durationSec = 0.0,
+        durationSec = this.durationSec,
         provider = providerId
     )
 }

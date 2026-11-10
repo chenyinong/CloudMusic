@@ -58,7 +58,7 @@ class GraphClient(
     companion object {
         const val GRAPH = "https://graph.microsoft.com/v1.0"
         private const val SELECT =
-            "id,name,size,file,folder,parentReference,lastModifiedDateTime"
+            "id,name,size,file,folder,parentReference,lastModifiedDateTime,audio"
     }
 
     /** 拿到可用的 access token，过期就自动用 refresh_token 换新的 */
@@ -105,6 +105,8 @@ class GraphClient(
                 val mime = o.optJSONObject("file")?.optString("mimeType").orEmpty()
                     .takeIf { it.startsWith("audio/", ignoreCase = true) }
                     ?: AudioTypes.mimeOf(name)
+                // OneDrive 音频 item 自带 audio facet，duration 单位是毫秒
+                val durMs = o.optJSONObject("audio")?.optLong("duration") ?: 0L
                 out.add(
                     DavEntry(
                         href = id,
@@ -114,7 +116,8 @@ class GraphClient(
                         lastModified = 0L,
                         contentType = if (isFolder) "" else mime,
                         parentPath = o.optJSONObject("parentReference")
-                            ?.optString("path").orEmpty()
+                            ?.optString("path").orEmpty(),
+                        durationSec = durMs / 1000.0
                     )
                 )
             }
@@ -199,6 +202,34 @@ class GraphClient(
 
     /** 播放地址：Graph 会 302 到带签名的直链，OkHttp 自动跟随且保留 Range */
     fun playUrl(itemId: String): String = "$GRAPH/me/drive/items/$itemId/content"
+
+    /** 取单个 item 的 audio.duration（毫秒），拿不到返回 null。投屏断点续播懒加载时长用。 */
+    suspend fun itemAudioDurationMs(itemId: String): Long? = withContext(Dispatchers.IO) {
+        val token = accessToken()
+        if (token == null) {
+            android.util.Log.d("CM/Cast", "itemAudioDurationMs: token null for $itemId")
+            return@withContext null
+        }
+        val url = "$GRAPH/me/drive/items/$itemId?\$select=audio"
+        val request = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $token")
+            .build()
+        try {
+            http.newCall(request).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                android.util.Log.d("CM/Cast", "itemAudioDurationMs code=${resp.code} body=${body.take(160)}")
+                if (!resp.isSuccessful) return@use null
+                val o = JSONObject(body)
+                val dur = o.optJSONObject("audio")?.optLong("duration")
+                android.util.Log.d("CM/Cast", "itemAudioDurationMs parsed dur=$dur")
+                dur?.takeIf { it > 0 }
+            }
+        } catch (e: Exception) {
+            android.util.Log.d("CM/Cast", "itemAudioDurationMs ex=${e.message}")
+            null
+        }
+    }
 
     /** 在某个目录下建文件夹（已存在就复用），返回新文件夹的 item id */
     suspend fun ensureFolder(parentId: String?, name: String): String? =

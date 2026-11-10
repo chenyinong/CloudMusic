@@ -12,6 +12,8 @@ data class DavEntry(
     val contentType: String,
     /** 所在目录路径，OneDrive 用（形如 /drive/root:/Music/Album） */
     val parentPath: String = "",
+    /** 音频时长（秒）。OneDrive 从 item 的 audio facet 取；WebDAV 标准协议不提供，默认 0 */
+    val durationSec: Double = 0.0,
 )
 
 object AudioTypes {

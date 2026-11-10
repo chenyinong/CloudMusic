@@ -461,6 +461,7 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
         mime = "audio/*",
         durationSec = c.durationSec.toDouble(),
         provider = "online",
+        extraHeaders = c.extraHeaders,
     )
 
     /**

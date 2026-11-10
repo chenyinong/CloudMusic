@@ -65,6 +65,9 @@ class OneDriveProvider(
 
     override suspend fun fetchText(entryId: String): String? = graph.downloadText(entryId)
 
+    /** 懒加载单文件时长（毫秒），投屏断点续播用，拿不到返回 null */
+    suspend fun fetchAudioDurationMs(itemId: String): Long? = graph.itemAudioDurationMs(itemId)
+
     override fun playUrl(entryId: String): String = graph.playUrl(entryId)
 
     override fun isReady(): Boolean =

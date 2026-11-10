@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>方案 B · 纯半透明玻璃</title>
+<style>
+  :root {
+    --accent: #23272e;
+    --ink: #1b1d21;
+    --muted: #8a9099;
+    --line: #eceef1;
+  }
+  * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+  body {
+    margin: 0; min-height: 100vh; padding: 40px 28px;
+    background: radial-gradient(1100px 700px at 25% 0%, #eef3f0 0%, #e9ecf0 55%, #e4e8ed 100%);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    color: var(--ink);
+    display: flex; align-items: center; justify-content: center; gap: 54px; flex-wrap: wrap;
+  }
+  .stage { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .stage-label { font-size: 13px; letter-spacing: .14em; color: #7c8792; font-weight: 600; }
+
+  /* ── 手机 ── */
+  .phone {
+    position: relative; width: 360px; height: 760px; flex: none;
+    border-radius: 38px; overflow: hidden;
+    background: #fff;
+    box-shadow: 0 30px 70px rgba(28, 40, 55, .22), 0 0 0 9px #1d2126, 0 0 0 10px #3a4048;
+  }
+  .statusbar {
+    height: 34px; padding: 0 18px; display: flex; align-items: center;
+    justify-content: space-between; font-size: 11px; font-weight: 700; color: #4a5058;
+    background: #fff; position: relative; z-index: 2;
+  }
+  .app-head {
+    padding: 8px 16px 6px; background: #fff; position: relative; z-index: 2;
+  }
+  .app-head h1 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: .02em; }
+  .tabs { display: flex; gap: 22px; margin-top: 12px; font-size: 13px; color: var(--muted); }
+  .tabs .on { color: var(--ink); font-weight: 700; position: relative; }
+  .tabs .on::after {
+    content: ""; position: absolute; left: 50%; bottom: -8px; transform: translateX(-50%);
+    width: 20px; height: 3px; border-radius: 2px; background: var(--accent);
+  }
+
+  /* 列表：全高渲染，内容能滚到两条玻璃后面 */
+  .scroll {
+    position: absolute; inset: 0; overflow-y: auto; padding-top: 120px; padding-bottom: 210px;
+    background: #fff; scrollbar-width: none;
+  }
+  .scroll::-webkit-scrollbar { display: none; }
+  .playall {
+    display: flex; align-items: center; gap: 9px; padding: 10px 16px 14px;
+    font-size: 13px; font-weight: 600; color: #43484f;
+  }
+  .playall .tri { color: var(--accent); font-size: 15px; }
+  .playall small { font-weight: 400; color: var(--muted); }
+  .row {
+    display: flex; align-items: center; gap: 11px; height: 62px; padding: 0 14px;
+    border-bottom: 1px solid #f5f6f7;
+  }
+  .row .no { width: 20px; text-align: center; font-size: 12px; color: #a6acb4; flex: none; }
+  .row .meta { flex: 1; min-width: 0; }
+  .row .name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .sub { margin-top: 4px; font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .badge {
+    font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 700;
+    background: #eef0f2; color: #7b828b; letter-spacing: .03em;
+  }
+  .row .act { color: #9aa1aa; font-size: 17px; flex: none; }
+  .row .dots { color: #9aa1aa; font-size: 15px; flex: none; letter-spacing: -2px; }
+
+  /* ── 玻璃（方案 B：无 backdrop-filter） ── */
+  .glass {
+    position: absolute; left: 10px; right: 10px; z-index: 5;
+    border-radius: 18px; overflow: hidden;
+    background: rgba(255, 255, 255, .80);
+    box-shadow: none; border: none;
+  }
+  .glass::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(180deg, rgba(255,255,255,.45), rgba(255,255,255,.04));
+  }
+  .mini { bottom: 96px; height: 56px; }
+  .tabbar { bottom: 30px; height: 58px; }
+
+  /* 切到「当前高版本灰雾」形态做对比 */
+  body.fog .glass { background: rgba(255, 255, 255, .32); backdrop-filter: blur(22px); -webkit-backdrop-filter: blur(22px); }
+  body.fog .glass::before { background: linear-gradient(180deg, rgba(255,255,255,.35), rgba(255,255,255,.04)); }
+
+  .progress { height: 2px; background: rgba(120,130,140,.16); position: relative; z-index: 1; }
+  .progress i { position: absolute; left: 0; top: 0; bottom: 0; width: 32%; background: var(--accent); }
+  .mini-inner {
+    height: 54px; padding: 0 10px 0 14px; display: flex; align-items: center; gap: 10px; position: relative; z-index: 1;
+  }
+  .cover {
+    width: 40px; height: 40px; border-radius: 50%; flex: none;
+    background: linear-gradient(150deg, #63a8f5, #2b6fd6 60%, #17459a);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.25);
+  }
+  .cover svg { width: 21px; height: 21px; }
+  .song {
+    flex: 1; min-width: 0; font-size: 14px; font-weight: 700; color: #14171b;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .playbtn {
+    width: 34px; height: 34px; border-radius: 50%; flex: none;
+    background: #fff; border: 1px solid rgba(120,130,140,.28);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .playbtn svg { width: 15px; height: 15px; fill: #14171b; margin-left: 2px; }
+  .icobtn { width: 30px; height: 34px; flex: none; display: flex; align-items: center; justify-content: center; }
+  .icobtn svg { width: 18px; height: 18px; fill: #2b3037; }
+
+  .tab-inner { height: 58px; display: flex; align-items: center; position: relative; z-index: 1; }
+  .tab-inner .item { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 10px; color: #6b727b; }
+  .tab-inner .item.on { color: var(--accent); font-weight: 700; }
+  .tab-inner svg { width: 20px; height: 20px; fill: currentColor; }
+
+  /* 系统手势条 */
+  .sysnav {
+    position: absolute; bottom: 0; left: 0; right: 0; height: 26px; z-index: 6;
+    display: flex; align-items: center; justify-content: center; gap: 46px;
+    color: #9aa0a8; font-size: 12px;
+  }
+  .sysnav span { opacity: .75; }
+
+  /* ── 右侧说明 ── */
+  .info { width: 320px; flex: none; }
+  .info .kicker { font-size: 11px; letter-spacing: .2em; color: var(--accent); font-weight: 800; }
+  .info h2 { margin: 10px 0 6px; font-size: 26px; letter-spacing: -.01em; }
+  .info .lead { margin: 0 0 20px; font-size: 13px; line-height: 1.7; color: #65707b; }
+  .card {
+    background: rgba(255,255,255,.82); border: 1px solid rgba(255,255,255,.9);
+    border-radius: 16px; padding: 18px 20px; box-shadow: 0 12px 30px rgba(40,55,70,.08);
+  }
+  .card h3 { margin: 0 0 12px; font-size: 13px; font-weight: 800; }
+  .card ul { margin: 0; padding: 0; list-style: none; }
+  .card li { font-size: 12.5px; line-height: 2; color: #4c555f; display: flex; gap: 8px; }
+  .card li::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); margin-top: 9px; flex: none; }
+  .card li em { font-style: normal; color: var(--ink); font-weight: 700; }
+  .note {
+    margin-top: 14px; padding: 12px 14px; border-radius: 12px;
+    background: rgba(24,181,102,.09); font-size: 12px; line-height: 1.75; color: #2f6e4d;
+  }
+  .controls { margin-top: 18px; display: flex; gap: 9px; flex-wrap: wrap; }
+  button {
+    font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+    padding: 9px 14px; border-radius: 10px; border: 1px solid #d3d9df;
+    background: #fff; color: #39424b; transition: .18s;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
+  button.primary:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .foot { margin-top: 16px; font-size: 11px; color: #8b949d; line-height: 1.7; }
+</style>
+</head>
+<body>
+
+<div class="stage">
+  <div class="stage-label">方案 B · 真机还原（无模糊）</div>
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span>●●● ▮</span></div>
+    <div class="app-head">
+      <h1>云音乐</h1>
+      <div class="tabs"><span class="on">理想</span><span>最近</span><span>本地</span></div>
+    </div>
+
+    <div class="scroll" id="scroll">
+      <div class="playall"><span class="tri">▶</span> 全部播放 <small>(69)</small></div>
+      <div class="row"><span class="no">6</span><div class="meta"><div class="name">晴天</div><div class="sub">周杰伦 · OneDrive <span class="badge">FLAC</span></div></div><span class="act">+</span><span class="dots">⋮</span></div>
+      <div class="row"><span class="no">7</span><div class="meta"><div class="name">东风破</div><div class="sub">周杰伦 · OneDrive <span class="badge">FLAC</span></div></div><span class="act">+</span><span class="dots">⋮</span></div>
+      <div class="row"><span class="no">8</span><div class="meta"><div class="name">园游会</div><div class="sub">周杰伦 · OneDrive <span class="badge">FLAC</span></div></div><span class="act">+</span><span class="dots">⋮</span></div>
+      <div class="row"><span class="no">9</span><div class="meta"><div class="name">莫忙</div><div class="sub">乡野低频 · 坚果云 <span class="badge">FLAC</span></div></div><span class="act">+</span><span class="dots">⋮</span></div>
+      <div class="row"><span class="no">10</span><div class="meta"><div class="name">困兽之斗</div><div class="sub">周杰伦 · OneDrive <span class="badge">FLAC</span></div></div><span class="act">+</span><span class="dots">⋮</span></div>
+      <div class="row"><span class="no">11</span><div class="meta"><div class="name">十年</div><div class="sub">陈奕迅 · OneDrive <span class="badge">FLAC</span></div></div><span class="act">+</span><span class="dots">⋮</span></div>
+      <div class="row"><span class="no">12</span><div class="meta"><div class="name">走马</div><div class="sub">陈粒 · OneDrive <span class="badge">WAV</span></div></div><span class="act">+</span><span class="dots">⋮</span></div>
+      <div class="row"><span class="no">13</span><div class="meta"><div class="name">奇妙能力歌</div><div class="sub">陈粒 · OneDrive <span class="badge">WAV</span></div></div><span class="act">+</span><span class="dots">⋮</span></div>
+      <div class="row"><span class="no">14</span><div class="meta"><div class="name">我记得</div><div class="sub">赵雷 · OneDrive <span class="badge">FLAC</span></div></div><span class="act">+</span><span class="dots">⋮</span></div>
+      <div class="row"><span class="no">15</span><div class="meta"><div class="name">克卜勒</div><div class="sub">孙燕姿 · OneDrive <span class="badge">FLAC</span></div></div><span class="act">+</span><span class="dots">⋮</span></div>
+      <div class="row"><span class="no">16</span><div class="meta"><div class="name">三人游</div><div class="sub">方大同 · OneDrive <span class="badge">FLAC</span></div></div><span class="act">+</span><span class="dots">⋮</span></div>
+    </div>
+
+    <!-- mini 播放器 -->
+    <div class="glass mini">
+      <div class="progress"><i></i></div>
+      <div class="mini-inner">
+        <div class="cover">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round">
+            <circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>
+          </svg>
+        </div>
+        <div class="song">克卜勒 - 孙燕姿</div>
+        <div class="playbtn"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+        <div class="icobtn"><svg viewBox="0 0 24 24"><path d="M6 5l9 7-9 7V5zm10 0h2v14h-2V5z"/></svg></div>
+        <div class="icobtn"><svg viewBox="0 0 24 24"><path d="M4 6h11v2H4V6zm0 5h11v2H4v-2zm0 5h8v2H4v-2zm14-10h2v10.5a2.5 2.5 0 1 1-2-2.45V6z"/></svg></div>
+      </div>
+    </div>
+
+    <!-- 底部 TAB 栏 -->
+    <div class="glass tabbar">
+      <div class="tab-inner">
+        <div class="item on"><svg viewBox="0 0 24 24"><path d="M12 3v10.5a3 3 0 1 1-2-2.83V6.5l7 1.8V4l-7-1z"/></svg><span>我的</span></div>
+        <div class="item"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4V4zm2 2v12h12V6H6zm2 3h8v2H8V9zm0 4h8v2H8v-2z"/></svg><span>歌单</span></div>
+        <div class="item"><svg viewBox="0 0 24 24"><path d="M10 3a7 7 0 1 0 4.2 12.6l4.6 4.6 1.4-1.4-4.6-4.6A7 7 0 0 0 10 3zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10z"/></svg><span>搜歌</span></div>
+        <div class="item"><svg viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm9 4 2 1-2 3-2.2-.8a8 8 0 0 1-1.6 1l-.4 2.3h-3.6l-.4-2.3a8 8 0 0 1-1.6-1L8.6 16l-2-3 1.9-1.4a8 8 0 0 1 0-2L6.6 8.2l2-3 2.2.8a8 8 0 0 1 1.6-1L12.8 2.7h3.6l.4 2.3a8 8 0 0 1 1.6 1l2.2-.8 2 3-1.9 1.4a8 8 0 0 1 0 2L21 12z"/></svg><span>设置</span></div>
+      </div>
+    </div>
+
+    <div class="sysnav"><span>☰</span><span>□</span><span>◁</span></div>
+  </div>
+</div>
+
+<div class="info">
+  <div class="kicker">PLAN B</div>
+  <h2>纯半透明玻璃</h2>
+  <p class="lead">去掉 haze，mini 条和 TAB 栏就是两层干净的白玻璃。<strong>所有 Android 版本长得完全一样</strong> —— 不再随系统版本变脸。</p>
+
+  <div class="card">
+    <h3>这一版的规格</h3>
+    <ul>
+      <li>底色 <em>白 80%</em>，无描边、无投影</li>
+      <li>顶部高光渐变（白 45% → 4%）</li>
+      <li>四角 <em>18dp 圆角</em>，左右/底部留边距</li>
+      <li><em>无模糊</em>：页面没有用 backdrop-filter</li>
+      <li>保留单行粗体歌名 + 圆形播放钮</li>
+      <li>保留顶部 2dp 进度线 + 四个 TAB</li>
+    </ul>
+  </div>
+
+  <div class="note">
+    背后的列表文字会<strong>淡淡透出但依然清晰</strong>，不会糊成一团灰雾 —— 这就是你认可的那台 Android 12 上的观感，只是现在高版本手机也一样。
+  </div>
+
+  <div class="controls">
+    <button class="primary" id="toggle">切换：看高版本灰雾</button>
+    <button id="scrolldown">列表滚到底</button>
+    <button id="scrolltop">回到顶部</button>
+  </div>
+  <div class="foot">
+    手机内的列表可直接用滚轮滚动，看内容滑过玻璃后面的样子。<br>
+    灰雾模式只在这张图里模拟（浏览器 backdrop-filter），不会写进 App。
+  </div>
+</div>
+
+<script>
+  const s = document.getElementById('scroll');
+  document.getElementById('toggle').addEventListener('click', function () {
+    const fog = document.body.classList.toggle('fog');
+    this.textContent = fog ? '切回：方案 B' : '切换：看高版本灰雾';
+    this.classList.toggle('primary', !fog);
+  });
+  document.getElementById('scrolldown').addEventListener('click', () => s.scrollTo({ top: s.scrollHeight, behavior: 'smooth' }));
+  document.getElementById('scrolltop').addEventListener('click', () => s.scrollTo({ top: 0, behavior: 'smooth' }));
+</script>
+</body>
+</html>

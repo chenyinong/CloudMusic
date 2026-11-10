@@ -1,6 +1,7 @@
 package com.cloudmusic.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -73,24 +74,33 @@ fun DiscPage(
                 }
             }
             Spacer(Modifier.height(14.dp))
+            // 描边轻胶囊：跟播放页背景取同一套封面色，灰底实心那块补丁感太重
+            val accentColors = coverColors(title)
+            val accentDark = accentColors[1]
             Row(
                 Modifier
                     .clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .background(accentColors[0].copy(alpha = 0.08f))
+                    .border(
+                        width = 1.dp,
+                        color = accentColors[0].copy(alpha = 0.28f),
+                        shape = RoundedCornerShape(16.dp)
+                    )
                     .padding(horizontal = 12.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     Icons.Filled.GraphicEq,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = accentDark,
                     modifier = Modifier.size(14.dp)
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
                     "网盘直连 · 原音质",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    fontWeight = FontWeight.Medium,
+                    color = accentDark
                 )
             }
         }

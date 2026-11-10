@@ -19,5 +19,7 @@ data class Track(
     val mime: String,
     val durationSec: Double = 0.0,
     /** 来自哪个网盘：webdav / onedrive */
-    val provider: String = ProviderKind.WEBDAV.id
+    val provider: String = ProviderKind.WEBDAV.id,
+    /** 在线直链防盗链 header（QQ/网易云常需 Referer，夸克需 Cookie），投屏代理时透传给上游 */
+    val extraHeaders: Map<String, String> = emptyMap()
 )

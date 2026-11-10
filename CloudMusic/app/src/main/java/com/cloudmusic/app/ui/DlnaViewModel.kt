@@ -1,6 +1,7 @@
 package com.cloudmusic.app.ui
 
 import android.app.Application
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -8,6 +9,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.cloudmusic.app.App
 import com.cloudmusic.app.data.Track
+import com.cloudmusic.app.data.ProviderKind
 import com.cloudmusic.app.data.dlna.DlnaClient
 import com.cloudmusic.app.data.dlna.DlnaDevice
 import com.cloudmusic.app.data.dlna.DlnaServer
@@ -139,6 +141,8 @@ class DlnaViewModel(app: Application) : AndroidViewModel(app) {
             val s = withContext(Dispatchers.IO) { ensureServer() } ?: return@launch
             // 正常推歌是从头播，别留着上次的偏移
             s.setStartOffset(track.key, 0)
+            s.setStartOffsetBytes(track.key, 0)
+            s.setCastTrack(track)
             val uri = s.mediaUri(track)
             val meta = s.didlFor(track)
 
@@ -211,7 +215,21 @@ class DlnaViewModel(app: Application) : AndroidViewModel(app) {
         val device = casting ?: return
         viewModelScope.launch {
             val ok = withContext(Dispatchers.IO) {
-                if (castPlaying) client.pause(device) else client.play(device)
+                if (castPlaying) {
+                    val r = client.pause(device)
+                    Log.d("CM/Cast", "pause(device) -> $r")
+                    r
+                } else {
+                    // 先看清设备卡在哪个状态：小米音箱常把「暂停」退化成「停止」，
+                    // 这种光发 Play 没有 URI 就出不了声，得把当前这首重新推一遍
+                    // （带上偏移，从断点接着播）。仍是 PAUSED 才直接 Play 恢复。
+                    val st = client.transportState(device)
+                    val pausedLike = st != null && st.contains("PAUS", ignoreCase = true)
+                    Log.d("CM/Cast", "resume: transportState=[$st] pausedLike=$pausedLike posMs=$castPositionMs")
+                    val r = if (pausedLike) client.play(device) else rePush(device, castPositionMs)
+                    Log.d("CM/Cast", "resume action -> $r")
+                    r
+                }
             }
             if (ok) {
                 castPlaying = !castPlaying
@@ -274,17 +292,31 @@ class DlnaViewModel(app: Application) : AndroidViewModel(app) {
     private fun pushWithOffset(device: DlnaDevice, positionMs: Long) {
         viewModelScope.launch {
             val s = ensureServer() ?: return@launch
-            val track = appRef.player.currentTrack ?: return@launch
+            var track = appRef.player.currentTrack ?: return@launch
+            // 网盘歌可能没时长，断点/拖动前实时拉一次（回填曲库 + 更新 castTrack）
+            if (track.provider == ProviderKind.ONEDRIVE.id && track.durationSec <= 0) {
+                track = resolveDuration(track)
+                s.setCastTrack(track)
+            }
+            // 有毫秒时长才精确跳；无时长拖动只能从头，并清掉残留的字节偏移
+            val resumeMs = if (track.durationSec > 0) positionMs else 0L
             // 偏移记在服务端，地址保持干净 —— 小爱音箱那类设备解析带 ? 的 URL 很粗
-            s.setStartOffset(track.key, positionMs)
+            if (track.durationSec > 0) {
+                s.setStartOffset(track.key, resumeMs)
+                s.setStartOffsetBytes(track.key, 0)
+            } else {
+                s.setStartOffset(track.key, 0)
+                s.setStartOffsetBytes(track.key, 0)
+            }
+            s.setCastTrack(track)
             val uri = s.mediaUri(track)
             val ok = withContext(Dispatchers.IO) { client.push(device, uri, s.didlFor(track, uri)) }
             if (ok) {
                 val now = System.currentTimeMillis()
-                castPositionMs = positionMs
+                castPositionMs = resumeMs
                 castPlaying = true
                 // 基准挪到偏移处：这一首是「从偏移位置接着播」的
-                castBasePos = positionMs
+                castBasePos = resumeMs
                 castBaseAt = now
                 seekTarget = -1
                 castTrackStartedAt = now
@@ -295,6 +327,71 @@ class DlnaViewModel(app: Application) : AndroidViewModel(app) {
                     "（它既不认 Seek 指令，也不肯重新拉流）"
             }
         }
+    }
+
+    /**
+     * 重新把当前这首推给设备，并从指定位置接着播。
+     *
+     * 用途：投屏暂停后，部分音箱（小米）会把状态退化成 STOPPED，
+     * 此时 URI 可能已被清空，光发 Play 没声音 —— 只能重新 SetAVTransportURI 推一遍。
+     * 偏移记在我们自己的 HTTP 服务里，设备只管从头/断点拉流。
+     */
+    /**
+     * 网盘歌扫描时可能没拿到时长（没重扫/漏了 audio facet），
+     * 投屏断点续播前从 OneDrive 实时拉一次，回填曲库并返回带时长的 track。
+     */
+    private suspend fun resolveDuration(track: Track): Track {
+        Log.d("CM/Cast", "resolveDuration provider=${track.provider} want=${ProviderKind.ONEDRIVE.id} durSec=${track.durationSec}")
+        if (track.durationSec > 0 || track.provider != ProviderKind.ONEDRIVE.id) return track
+        val durMs = appRef.oneDriveProvider.fetchAudioDurationMs(track.id) ?: run {
+            Log.d("CM/Cast", "resolveDuration: fetchAudioDurationMs returned null for ${track.id}")
+            return track
+        }
+        val dur = durMs / 1000.0
+        Log.d("CM/Cast", "resolveDuration got durSec=$dur")
+        if (dur <= 0) return track
+        appRef.repository.updateDuration(track.key, dur)
+        return track.copy(durationSec = dur)
+    }
+
+    private suspend fun rePush(device: DlnaDevice, positionMs: Long): Boolean {
+        val s = ensureServer() ?: return false
+        var track = appRef.player.currentTrack ?: return false
+        // 网盘歌可能没时长，断点续播前实时拉一次（回填曲库 + 更新 castTrack）
+        if (track.provider == ProviderKind.ONEDRIVE.id && track.durationSec <= 0) {
+            track = resolveDuration(track)
+            s.setCastTrack(track)
+        }
+        // 有毫秒时长 → 用毫秒偏移（精确）；没有（OneDrive 没存时长）→ 字节级续传，
+        // 用「上次已发给设备的字节数」做起点，无需时长也能从断点接着播。
+        val resumeMs = if (track.durationSec > 0) positionMs else 0L
+        if (track.durationSec > 0) {
+            s.setStartOffset(track.key, resumeMs)
+            s.setStartOffsetBytes(track.key, 0)
+        } else {
+            // OneDrive 这类没有时长元数据的歌，字节级续播会哑（M4A/MP4 容器必须从头带 moov 才能解码，
+            // 从文件中间发过去音箱直接解码失败）。所以不强制字节偏移，交给音箱自己用 Range 续传：
+            // 它发 bytes=X- 我们就 X-，它从头拉就从头（至少能出声）。
+            s.setStartOffset(track.key, 0)
+            s.setStartOffsetBytes(track.key, 0)
+        }
+        s.setCastTrack(track)
+        val uri = s.mediaUri(track)
+        val ok = client.push(device, uri, s.didlFor(track, uri))
+        Log.d("CM/Cast", "rePush push -> $ok resumeMs=$resumeMs posMs=$positionMs uri=$uri")
+        if (ok) {
+            val now = System.currentTimeMillis()
+            castPositionMs = resumeMs
+            castPlaying = true
+            castBasePos = resumeMs
+            castBaseAt = now
+            seekTarget = -1
+            castTrackStartedAt = now
+            error = null
+        } else {
+            s.setStartOffset(track.key, 0)
+        }
+        return ok
     }
 
     /** 下一首：手机上换到下一首，再把新歌推给设备 */
@@ -339,6 +436,8 @@ class DlnaViewModel(app: Application) : AndroidViewModel(app) {
             val s = ensureServer() ?: return@launch
             // 换歌是从头开始，别留着上次的偏移
             s.setStartOffset(track.key, 0)
+            s.setStartOffsetBytes(track.key, 0)
+            s.setCastTrack(track)
             val ok = withContext(Dispatchers.IO) {
                 client.push(device, s.mediaUri(track), s.didlFor(track))
             }
@@ -381,6 +480,7 @@ class DlnaViewModel(app: Application) : AndroidViewModel(app) {
             var sameCount = 0
             var staleCount = 0
             var positionSupported = true
+            var lastPollLog = 0L
             while (true) {
                 val device = casting ?: break
                 val now = System.currentTimeMillis()
@@ -393,6 +493,10 @@ class DlnaViewModel(app: Application) : AndroidViewModel(app) {
                 // 本地推算出来的当前位置（基准 + 经过的时间）
                 val drift = if (castPlaying) (now - castBaseAt).coerceAtLeast(0L) else 0L
                 val local = castBasePos + drift
+                if (now - lastPollLog > 1000) {
+                    lastPollLog = now
+                    Log.d("CM/Cast", "poll st=$st playing=$castPlaying pos=$pos local=${local}ms")
+                }
 
                 // 刚拖过进度：两秒内别用设备的位置把它拉回去，等它到底动没动
                 if (seekTarget >= 0) {
@@ -432,11 +536,19 @@ class DlnaViewModel(app: Application) : AndroidViewModel(app) {
                 val trustworthy = pos != null && !justPushed &&
                     kotlin.math.abs(pos - local) < 15000
 
-                if (trustworthy) {
+                if (trustworthy && positionSupported) {
+                    // 设备位置可信：用它校正，顺便纠手机时钟漂移
                     staleCount = 0
                     castBasePos = pos!!
                     castBaseAt = now
                     castPositionMs = castBasePos
+                } else if (castPlaying && seekTarget < 0) {
+                    // 本地计时退化（小米这类查不到进度的设备）：
+                    // 播放中把基准锚定到当前推算位置；暂停时本分支不进，
+                    // 基准冻结在暂停那一刻 → 进度条停在暂停处而不是归零。
+                    castBasePos = local
+                    castBaseAt = now
+                    castPositionMs = local
                 } else {
                     if (pos != null && !justPushed) staleCount++
                     // 一直对不上，基本可以确定它不支持查进度
