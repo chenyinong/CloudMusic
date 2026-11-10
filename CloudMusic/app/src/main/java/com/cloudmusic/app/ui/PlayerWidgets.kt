@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -148,6 +149,8 @@ fun PlayerControlBar(
     onNext: () -> Unit,
     onCycleRepeat: () -> Unit,
     onShowQueue: () -> Unit,
+    sleepMode: Int = 0,
+    onSleep: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -155,6 +158,16 @@ fun PlayerControlBar(
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
+        IconButton(onClick = onSleep, modifier = Modifier.size(42.dp)) {
+            Icon(
+                imageVector = Icons.Filled.Schedule,
+                contentDescription = "定时关闭",
+                tint = if (sleepMode != 0) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+
         IconButton(onClick = onCycleRepeat, modifier = Modifier.size(42.dp)) {
             Icon(
                 imageVector = if (repeatMode == Player.REPEAT_MODE_ONE) {

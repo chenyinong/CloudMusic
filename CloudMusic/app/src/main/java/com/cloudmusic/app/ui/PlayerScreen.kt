@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -43,6 +44,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -99,6 +102,7 @@ fun PlayerScreen(
     var showDlna by remember { mutableStateOf(false) }
     var showQueue by remember { mutableStateOf(false) }
     var showInfo by remember { mutableStateOf(false) }
+    var showSleep by remember { mutableStateOf(false) }
     /**
      * 「更多」菜单从哪儿弹出来的。
      *
@@ -512,8 +516,40 @@ fun PlayerScreen(
                 onNext = { if (casting != null) dlnaVm.nextCast() else conn.next() },
                 onCycleRepeat = { conn.cycleRepeatMode() },
                 onShowQueue = { showQueue = true },
+                sleepMode = conn.sleepMode,
+                onSleep = { showSleep = true },
                 modifier = Modifier.fillMaxWidth()
             )
+
+            if (conn.sleepMode != 0) {
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { showSleep = true },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Filled.Schedule,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        if (conn.sleepMode == 1) "定时关闭 · ${formatTime((conn.sleepRemainingSec * 1000L).coerceAtLeast(0))}"
+                        else "播完当前歌曲后关闭",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "取消",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
 
             // 底部留白：QQ 音乐的控制栏离屏幕底还有一小段，别贴着
             Spacer(Modifier.height(44.dp))
@@ -550,6 +586,51 @@ fun PlayerScreen(
             currentKey = track?.key,
             onPick = { conn.jumpTo(it) },
             onDismiss = { showQueue = false }
+        )
+    }
+
+    if (showSleep) {
+        val sleepSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showSleep = false },
+            sheetState = sleepSheetState,
+            containerColor = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+                Text(
+                    "定时关闭",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+                )
+                listOf(15, 30, 45, 60, 90).forEach { m ->
+                    SleepSheetRow("$m 分钟后关闭") { conn.startSleep(m); showSleep = false }
+                }
+                SleepSheetRow("播完当前歌曲后关闭") { conn.startSleepAfterTrack(); showSleep = false }
+                if (conn.sleepMode != 0) {
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                    SleepSheetRow("取消定时", danger = true) { conn.cancelSleep(); showSleep = false }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SleepSheetRow(text: String, danger: Boolean = false, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
         )
     }
 }

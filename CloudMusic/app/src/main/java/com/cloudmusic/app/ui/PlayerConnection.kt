@@ -12,7 +12,12 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionToken
+import android.os.Bundle
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
 import com.cloudmusic.app.data.Track
 import com.cloudmusic.app.player.MusicService
 
@@ -65,6 +70,13 @@ class PlayerConnection(private val context: Context) {
     var shuffle by mutableStateOf(false)
         private set
 
+    /** 定时关闭状态：0=关 1=倒计时 2=播完当前曲。 */
+    var sleepMode by mutableStateOf(0)
+        private set
+    /** 倒计时剩余秒数，-1 表示未知（如播完当前曲模式）。 */
+    var sleepRemainingSec by mutableStateOf(-1)
+        private set
+
     private var playlist: List<Track> = emptyList()
 
     /**
@@ -106,6 +118,27 @@ class PlayerConnection(private val context: Context) {
         }
     }
 
+    // 接收后台服务回传的定时关闭状态（MediaSession 自定义命令在 MediaController.Listener 上）
+    private val controllerListener = object : MediaController.Listener {
+        override fun onCustomCommand(
+            controller: MediaController,
+            sessionCommand: SessionCommand,
+            args: Bundle
+        ): ListenableFuture<SessionResult> {
+            when (sessionCommand.customAction) {
+                MusicService.ACTION_SLEEP_TICK -> {
+                    sleepMode = args.getInt("mode")
+                    sleepRemainingSec = args.getInt("remaining")
+                }
+                MusicService.ACTION_SLEEP_CLEARED -> {
+                    sleepMode = 0
+                    sleepRemainingSec = -1
+                }
+            }
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        }
+    }
+
     private var pendingTracks: List<Track>? = null
     private var pendingIndex: Int = 0
     private var pendingPositionMs: Long = 0L
@@ -113,7 +146,7 @@ class PlayerConnection(private val context: Context) {
     fun connect() {
         if (controller != null) return
         val token = SessionToken(context, ComponentName(context, MusicService::class.java))
-        val future = MediaController.Builder(context, token).buildAsync()
+        val future = MediaController.Builder(context, token).setListener(controllerListener).buildAsync()
         future.addListener({
             try {
                 val c = future.get()
@@ -288,6 +321,23 @@ class PlayerConnection(private val context: Context) {
         val next = !c.shuffleModeEnabled
         c.shuffleModeEnabled = next
         shuffle = next
+    }
+
+    /** 定时关闭：N 分钟后暂停。 */
+    fun startSleep(minutes: Int) {
+        val b = Bundle().apply { putInt("minutes", minutes) }
+        controller?.sendCustomCommand(SessionCommand(MusicService.ACTION_SLEEP_SET, Bundle.EMPTY), b)
+    }
+
+    /** 定时关闭：播完当前这首后暂停。 */
+    fun startSleepAfterTrack() {
+        val b = Bundle().apply { putBoolean("after_track", true) }
+        controller?.sendCustomCommand(SessionCommand(MusicService.ACTION_SLEEP_SET, Bundle.EMPTY), b)
+    }
+
+    /** 取消定时关闭。 */
+    fun cancelSleep() {
+        controller?.sendCustomCommand(SessionCommand(MusicService.ACTION_SLEEP_CANCEL, Bundle.EMPTY), Bundle.EMPTY)
     }
 
     /** 点队列里的某一首。 */

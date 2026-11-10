@@ -15,11 +15,40 @@ import androidx.media3.session.MediaSessionService
 import com.cloudmusic.app.R
 import com.cloudmusic.app.data.Prefs
 import java.io.File
+import android.os.Bundle
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * 后台播放服务。通知栏、锁屏控制、耳机按键都依赖它。
  */
 class MusicService : MediaSessionService() {
+
+    companion object {
+        const val ACTION_SLEEP_SET = "cm.sleep.set"
+        const val ACTION_SLEEP_CANCEL = "cm.sleep.cancel"
+        const val ACTION_SLEEP_TICK = "cm.sleep.tick"
+        const val ACTION_SLEEP_CLEARED = "cm.sleep.cleared"
+        const val SLEEP_OFF = 0
+        const val SLEEP_COUNTDOWN = 1
+        const val SLEEP_AFTER_TRACK = 2
+    }
+
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var sleepJob: Job? = null
+    private var sleepMode = SLEEP_OFF
+    private var sleepEndsAtMs = 0L
+    private var sleepAfterTrackId: String? = null
 
     private var mediaSession: MediaSession? = null
     private var player: ExoPlayer? = null
@@ -47,8 +76,11 @@ class MusicService : MediaSessionService() {
         )
         p.setHandleAudioBecomingNoisy(true)
         player = p
+        p.addListener(playerListener)
 
-        mediaSession = MediaSession.Builder(this, p).build()
+        mediaSession = MediaSession.Builder(this, p)
+            .setCallback(sleepCallback)
+            .build()
 
         val provider = DefaultMediaNotificationProvider.Builder(this)
             .setChannelId("cloudmusic_playback")
@@ -83,6 +115,8 @@ class MusicService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        sleepJob?.cancel()
+        player?.removeListener(playerListener)
         mediaSession?.run {
             player.release()
             release()
@@ -92,5 +126,102 @@ class MusicService : MediaSessionService() {
         cache?.release()
         cache = null
         super.onDestroy()
+    }
+
+    private val playerListener = object : Player.Listener {
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_ENDED && sleepMode == SLEEP_AFTER_TRACK) {
+                val id = player?.currentMediaItem?.mediaId
+                if (id != null && id == sleepAfterTrackId) doSleep()
+            }
+        }
+
+        override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
+            // 用户切歌也跟着滚：始终「播完此刻这首」才停
+            if (sleepMode == SLEEP_AFTER_TRACK) sleepAfterTrackId = item?.mediaId
+        }
+    }
+
+    private val sleepCallback = object : MediaSession.Callback {
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle
+        ): ListenableFuture<SessionResult> {
+            when (customCommand.customAction) {
+                ACTION_SLEEP_SET -> {
+                    val minutes = args.getInt("minutes", 0)
+                    if (args.getBoolean("after_track", false)) startAfterTrack()
+                    else if (minutes > 0) startCountdown(minutes)
+                }
+                ACTION_SLEEP_CANCEL -> cancelSleep()
+            }
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        }
+    }
+
+    /** 倒计时 N 分钟到点暂停（带音量淡出）。 */
+    private fun startCountdown(minutes: Int) {
+        cancelSleepJob()
+        sleepMode = SLEEP_COUNTDOWN
+        sleepEndsAtMs = System.currentTimeMillis() + minutes * 60_000L
+        sleepJob = serviceScope.launch {
+            while (true) {
+                val remSec = ((sleepEndsAtMs - System.currentTimeMillis()) / 1000).toInt()
+                broadcastSleep(SLEEP_COUNTDOWN, remSec.coerceAtLeast(0))
+                if (remSec <= 0) break
+                delay(1000)
+            }
+            doSleep()
+        }
+    }
+
+    /** 播完当前这首后暂停。 */
+    private fun startAfterTrack() {
+        cancelSleepJob()
+        sleepMode = SLEEP_AFTER_TRACK
+        sleepAfterTrackId = player?.currentMediaItem?.mediaId
+        broadcastSleep(SLEEP_AFTER_TRACK, -1)
+    }
+
+    private fun cancelSleep() {
+        cancelSleepJob()
+        sleepMode = SLEEP_OFF
+        sleepAfterTrackId = null
+        broadcastCleared()
+    }
+
+    private fun cancelSleepJob() {
+        sleepJob?.cancel()
+        sleepJob = null
+    }
+
+    /** 淡出音量 2 秒后暂停，并复位音量供下次使用。 */
+    private fun doSleep() {
+        val p = player ?: return
+        serviceScope.launch {
+            for (i in 0..40) {
+                p.volume = 1f - i / 40f
+                delay(50)
+            }
+            p.pause()
+            p.volume = 1f
+            sleepMode = SLEEP_OFF
+            sleepAfterTrackId = null
+            broadcastCleared()
+        }
+    }
+
+    private fun broadcastSleep(mode: Int, remaining: Int) {
+        val b = Bundle().apply {
+            putInt("mode", mode)
+            putInt("remaining", remaining)
+        }
+        mediaSession?.broadcastCustomCommand(SessionCommand(ACTION_SLEEP_TICK, Bundle.EMPTY), b)
+    }
+
+    private fun broadcastCleared() {
+        mediaSession?.broadcastCustomCommand(SessionCommand(ACTION_SLEEP_CLEARED, Bundle.EMPTY), Bundle.EMPTY)
     }
 }
