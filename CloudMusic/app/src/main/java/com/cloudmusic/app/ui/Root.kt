@@ -94,7 +94,7 @@ fun CloudMusicRoot(vm: AppViewModel) {
                 vm.screen = Screen.LIBRARY
                 vm.rescanAfterImport()
             }
-            Screen.PLAYLIST_IMPORT -> vm.screen = Screen.LIBRARY
+            Screen.PLAYLIST_IMPORT -> { vm.screen = vm.importReturnScreen; vm.rescanAfterImport() }
             Screen.PLAYLIST_LIST -> vm.screen = Screen.LIBRARY
             Screen.PLAYLIST_DETAIL -> {
                 vm.screen = Screen.PLAYLIST_LIST
@@ -199,19 +199,21 @@ fun CloudMusicRoot(vm: AppViewModel) {
 
         Screen.IMPORT -> ImportScreen(
             providers = vm.connectedProviders,
+            // 搜歌页的「保存到网盘」卡要显示两个网盘的剩余空间
+            appVm = vm,
             onBack = {
                 vm.screen = Screen.LIBRARY
                 vm.rescanAfterImport()
             },
             // 已导入的行点整行只出声、留在搜歌页；想看播放页点底部迷你条，
             // 那时 playerOrigin 会按当前页记成 IMPORT，返回仍能回到这里。
-            onOpenPlaylistImport = { vm.screen = Screen.PLAYLIST_IMPORT }
+            onOpenPlaylistImport = { vm.importReturnScreen = Screen.IMPORT; vm.screen = Screen.PLAYLIST_IMPORT }
         )
 
         // 导入歌单：预览页底部有操作按钮，走统一避让（不参与滚到条后面）
         Screen.PLAYLIST_IMPORT -> Box(Modifier.padding(bottom = formPad)) {
             PlaylistImportScreen(
-                onBack = { vm.screen = Screen.LIBRARY },
+                onBack = { vm.screen = vm.importReturnScreen; vm.rescanAfterImport() },
                 onOpenPlaylist = { key ->
                     vm.playlistKey = key
                     vm.screen = Screen.PLAYLIST_DETAIL
@@ -222,7 +224,7 @@ fun CloudMusicRoot(vm: AppViewModel) {
         // 我的歌单：网易云那种列表，点进去才是歌单详情
         Screen.PLAYLIST_LIST -> PlaylistListScreen(
             onBack = { vm.screen = Screen.LIBRARY },
-            onOpenImport = { vm.screen = Screen.PLAYLIST_IMPORT },
+            onOpenImport = { vm.importReturnScreen = Screen.PLAYLIST_LIST; vm.screen = Screen.PLAYLIST_IMPORT },
             onOpenPlaylist = { key ->
                 vm.playlistKey = key
                 vm.screen = Screen.PLAYLIST_DETAIL

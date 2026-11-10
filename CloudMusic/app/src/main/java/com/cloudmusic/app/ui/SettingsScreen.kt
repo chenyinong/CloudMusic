@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -48,10 +49,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -65,10 +68,22 @@ import com.cloudmusic.app.data.formatBytes
  * 版式照 QQ 音乐设置页来：**分组白卡片 + 卡片内一行一项**，
  * 每行都是「标题（+ 小字说明）+ 右侧控件」，字号只有三档（标题 15 / 正文 13 / 说明 11），
  * 不再把服务器地址、账号、进度条、提示语全堆在一段里。
+ *
+ * 视觉上再加一层：顶部深色渐变配额总览卡、分组右侧小字、网盘彩色图标块与
+ * 「已连接」胶囊徽章。紫色强调色只在设置页局部用，不动全局的近黑主色。
  */
+/** 设置页局部强调色，避免影响其它页面的按钮/选中态 */
+private val Accent = Color(0xFF6C5CE7)
+private val AccentDeep = Color(0xFF2E2A55)
+private val AccentDarker = Color(0xFF1B1A33)
+private val BadgeGreen = Color(0xFF1E8E57)
+private val BadgeGreenBg = Color(0xFFE6F6EC)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
+    var showAbout by remember { mutableStateOf(false) }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -100,48 +115,42 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // ── 已连接的网盘 ────────────────────────────────
-            SettingsCard("网盘连接", Icons.Filled.Cloud) {
-                if (vm.connectedProviders.isEmpty()) {
+            // ── 顶部：账号与偏好总览 ────────────────────────
+            Text(
+                "ACCOUNT & PREFERENCES",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.2.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp)
+            )
+            QuotaOverviewCard(vm)
+
+            // ── 已连接的网盘：一个网盘一张白卡 ──────────────
+            SectionHeader(
+                label = "网盘连接",
+                icon = Icons.Filled.Cloud,
+                trailing = "已连接 ${vm.connectedProviders.size} 个"
+            )
+            if (vm.connectedProviders.isEmpty()) {
+                PlainCard {
                     Text(
                         "还没有连接任何网盘",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                } else {
-                    vm.connectedProviders.forEachIndexed { i, p ->
-                        if (i > 0) {
-                            HorizontalDivider(
-                                modifier = Modifier.padding(vertical = 10.dp),
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)
-                            )
-                        }
-                        ProviderBlock(vm = vm, provider = p)
-                    }
                 }
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "两个网盘可以同时连着，曲库会合并在一起，可以按网盘筛选。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "应用密码和登录令牌只保存在本机，不会上传。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            } else {
+                vm.connectedProviders.forEach { p ->
+                    PlainCard { ProviderBlock(vm = vm, provider = p) }
+                }
             }
-
-            // ── 外观 ───────────────────────────────────────
-            SettingsCard("外观", Icons.Filled.Palette) {
-                SwitchRow(
-                    title = "跟随系统深色模式",
-                    subtitle = "开启后随系统切换深色；关闭则固定浅色",
-                    checked = vm.themeFollowSystem,
-                    onChange = { vm.themeFollowSystem = it }
-                )
-            }
+            Text(
+                "两个网盘可以同时连着，曲库会合并在一起；应用密码和登录令牌只保存在本机。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
 
             // 添加另一个网盘：跳到它的登录页去
             if (vm.connectedProviders.size == 1) {
@@ -150,46 +159,63 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
                 } else {
                     ProviderKind.ONEDRIVE
                 }
-                SettingsCard("添加网盘", Icons.Filled.Add) {
+                PlainCard {
                     ActionRow(
                         text = "添加 ${other.label}",
-                        onClick = {
-                            vm.switchProvider(other)
-                            vm.screen = Screen.LOGIN
-                        }
-                    )
+                        icon = Icons.Filled.Add
+                    ) {
+                        vm.switchProvider(other)
+                        vm.screen = Screen.LOGIN
+                    }
                 }
             }
 
-            // ── 歌词 ───────────────────────────────────────
-            SettingsCard("歌词", Icons.Filled.MusicNote) {
+            // ── 外观与歌词 ─────────────────────────────────
+            SettingsCard("外观与歌词", Icons.Filled.Palette) {
+                SwitchRow(
+                    title = "跟随系统深色模式",
+                    subtitle = "跟随系统切换明暗主题",
+                    checked = vm.themeFollowSystem,
+                    onChange = { vm.themeFollowSystem = it }
+                )
+                RowDivider()
                 SwitchRow(
                     title = "在线歌词",
-                    subtitle = "开启后按歌名 + 歌手去 QQ 音乐匹配歌词，QQ 没有的再去下歌吧找；" +
-                        "关闭则只用网盘里同名的 .lrc 文件",
+                    subtitle = "优先匹配在线歌词，也可读取本地 .lrc",
                     checked = vm.onlineLyrics,
                     onChange = { vm.onlineLyrics = it }
                 )
             }
 
             // ── 夸克网盘：下载链路的中转站 ────────────────────
-            SettingsCard("下载中转", Icons.Filled.CloudDownload) {
-                Text(
-                    "夸克网盘",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(Modifier.height(6.dp))
+            SettingsCard(
+                label = "下载中转",
+                icon = Icons.Filled.CloudDownload,
+                trailing = if (vm.quarkLoggedIn) "已登录" else "未登录"
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    BrandIcon(Icons.Filled.CloudDownload, Color(0xFF7A5AF8))
+                    Spacer(Modifier.width(11.dp))
+                    Text(
+                        "夸克网盘",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (vm.quarkLoggedIn) StatusBadge("已登录")
+                }
+                Spacer(Modifier.height(8.dp))
                 if (vm.quarkLoggedIn) {
                     Text(
-                        "已登录${if (vm.quarkAccount.isNotBlank()) "：${vm.quarkAccount}" else ""}",
-                        style = MaterialTheme.typography.bodyMedium
+                        vm.quarkAccount.ifBlank { "作为补充音源，搜索未命中的歌曲" },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
                         "「下歌吧」音源已就绪 —— 网易云、酷我都搜不到的歌会走这里。",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
+                        color = Accent
                     )
                     if (vm.quarkCookieStale) {
                         Spacer(Modifier.height(4.dp))
@@ -201,7 +227,7 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
                     }
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SmallButton("直链诊断", MaterialTheme.colorScheme.primary) {
+                        SmallButton("直链诊断", Accent) {
                             vm.screen = Screen.QUARK_DIAG
                         }
                         SmallButton("退出登录", MaterialTheme.colorScheme.error) {
@@ -217,7 +243,7 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
                     )
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SmallButton("登录夸克", MaterialTheme.colorScheme.primary) {
+                        SmallButton("登录夸克", Accent) {
                             vm.screen = Screen.QUARK_LOGIN
                         }
                         SmallButton("直链诊断", MaterialTheme.colorScheme.onSurfaceVariant) {
@@ -233,11 +259,17 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
                 }
             }
 
-            // ── 维护操作 ─────────────────────────────────────
+            // ── 维护 ────────────────────────────────────────
             SettingsCard("维护", Icons.Filled.Settings) {
-                ActionRow("重新扫描音乐库") { vm.rescan() }
+                ActionRow("重新扫描音乐库", icon = Icons.Filled.Cloud) { vm.rescan() }
                 RowDivider()
-                ActionRow("清理播放缓存") { vm.clearCache() }
+                ActionRow("清理播放缓存", icon = Icons.Filled.MusicNote) { vm.clearCache() }
+                RowDivider()
+                ActionRow(
+                    text = "关于与版本",
+                    icon = Icons.Filled.Info,
+                    trailing = "v${BuildConfig.VERSION_NAME}"
+                ) { showAbout = true }
                 RowDivider()
                 ActionRow(
                     text = "退出 ${vm.providerKind.shortLabel}",
@@ -249,84 +281,243 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
                 }
             }
 
-            // ── 关于 ────────────────────────────────────────
-            SettingsCard("关于", Icons.Filled.Info) {
-                Text(
-                    "云音乐",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "云音乐 v${BuildConfig.VERSION_NAME}（构建 ${BuildConfig.BUILD_TIME}）",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "支持坚果云、Nextcloud、群晖等所有标准 WebDAV 服务，也支持微软 OneDrive，" +
-                        "两个网盘可以同时连着。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "本应用仅播放你自己的文件，不提供任何公共资源库。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            Text(
+                "感谢你用自己的方式听歌",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+    }
 
-            Spacer(Modifier.height(16.dp))
+    if (showAbout) {
+        AboutDialog(onDismiss = { showAbout = false })
+    }
+}
+
+/** 分组标题：小图标 + 深色加粗标题，右侧可挂一句状态小字。 */
+@Composable
+private fun SectionHeader(
+    label: String,
+    icon: ImageVector,
+    trailing: String? = null,
+) {
+    Row(
+        Modifier.padding(start = 4.dp, bottom = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = Accent,
+            modifier = Modifier.size(15.dp)
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
+        if (trailing != null) {
+            Text(
+                trailing,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
 
-/**
- * 分组 = 卡片外一行小标题（带图标）+ 一张白卡。
- *
- * 高级感主要来自这层节奏：标题在卡片外面、字距拉开、图标收敛成一根细线，
- * 卡片只用「极淡描边 + 大圆角」立形，不挂投影（投影在浅灰底上会显脏）。
- */
+/** 白卡本体：极淡描边 + 大圆角，不挂投影（浅灰底上投影会显脏）。 */
+@Composable
+private fun PlainCard(content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                shape = RoundedCornerShape(20.dp)
+            )
+            .padding(horizontal = 16.dp, vertical = 15.dp),
+        content = content
+    )
+}
+
+/** 分组 = 标题 + 一张白卡。 */
 @Composable
 private fun SettingsCard(
     label: String,
     icon: ImageVector,
+    trailing: String? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Column(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.padding(start = 4.dp, bottom = 9.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
-                modifier = Modifier.size(15.dp)
-            )
-            Spacer(Modifier.width(8.dp))
+        SectionHeader(label, icon, trailing)
+        PlainCard(content = content)
+    }
+}
+
+/** 顶部深色渐变总览卡：把两个网盘的已用 / 总量汇总到一处。 */
+@Composable
+private fun QuotaOverviewCard(vm: AppViewModel) {
+    val dav = vm.davQuota
+    val davUsed = dav?.used ?: vm.davUsedBytes
+    val davTotal = dav?.total ?: vm.davCapacityBytes
+    val od = vm.oneDriveQuota
+    val used = davUsed + (od?.used ?: 0L)
+    val total = davTotal + (od?.total ?: 0L)
+    val ratio = if (total > 0L) (used.toFloat() / total).coerceIn(0f, 1f) else 0f
+    val free = (total - used).coerceAtLeast(0L)
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(Brush.linearGradient(listOf(AccentDeep, AccentDarker)))
+            .padding(18.dp)
+    ) {
+        Column {
             Text(
-                label,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.8.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                "云盘配额",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White.copy(alpha = 0.55f)
             )
-        }
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .background(MaterialTheme.colorScheme.surface)
-                .border(
-                    width = 1.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
-                    shape = RoundedCornerShape(20.dp)
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    "${vm.connectedProviders.size}",
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
                 )
-                .padding(horizontal = 16.dp, vertical = 15.dp),
-            content = content
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    "个网盘已连接",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.8f),
+                    modifier = Modifier.padding(bottom = 5.dp)
+                )
+            }
+            Spacer(Modifier.height(15.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "已使用 ${formatBytes(used)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.75f),
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    "可用 ${formatBytes(free)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.75f)
+                )
+            }
+            Spacer(Modifier.height(7.dp))
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(5.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Color.White.copy(alpha = 0.16f))
+            ) {
+                if (ratio > 0f) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(ratio)
+                            .height(5.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(Color(0xFF9B8BFF))
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 网盘 / 夸克的彩色圆角图标块。 */
+@Composable
+private fun BrandIcon(icon: ImageVector, bg: Color) {
+    Box(
+        Modifier
+            .size(38.dp)
+            .clip(RoundedCornerShape(11.dp))
+            .background(bg),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = Color.White,
+            modifier = Modifier.size(21.dp)
         )
     }
+}
+
+/** 「已连接 / 已登录」绿色胶囊徽章。 */
+@Composable
+private fun StatusBadge(text: String) {
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(BadgeGreenBg)
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .size(5.dp)
+                .clip(CircleShape)
+                .background(BadgeGreen)
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
+            color = BadgeGreen
+        )
+    }
+}
+
+/** 关于与版本：原来单独一张卡，收进维护行点开的弹窗。 */
+@Composable
+private fun AboutDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        title = { Text("云音乐") },
+        text = {
+            Column {
+                Text(
+                    "云音乐 v${BuildConfig.VERSION_NAME}（构建 ${BuildConfig.BUILD_TIME}）",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "支持坚果云、Nextcloud、群晖等所有标准 WebDAV 服务，也支持微软 OneDrive，" +
+                        "两个网盘可以同时连着。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "本应用仅播放你自己的文件，不提供任何公共资源库。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        }
+    )
 }
 
 /** 卡片内的一条分隔线 */
@@ -365,7 +556,7 @@ private fun SwitchRow(
             )
         }
         Spacer(Modifier.width(12.dp))
-        SoftSwitch(checked = checked, onCheckedChange = onChange)
+        SoftSwitch(checked = checked, onCheckedChange = onChange, trackColor = Accent)
     }
 }
 
@@ -373,6 +564,8 @@ private fun SwitchRow(
 @Composable
 private fun ActionRow(
     text: String,
+    icon: ImageVector? = null,
+    trailing: String? = null,
     error: Boolean = false,
     onClick: () -> Unit
 ) {
@@ -384,6 +577,16 @@ private fun ActionRow(
             .padding(vertical = 11.dp, horizontal = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (icon != null) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = if (error) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                modifier = Modifier.size(17.dp)
+            )
+            Spacer(Modifier.width(10.dp))
+        }
         Text(
             text,
             style = MaterialTheme.typography.bodyMedium,
@@ -392,6 +595,14 @@ private fun ActionRow(
             else MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f)
         )
+        if (trailing != null) {
+            Text(
+                trailing,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.width(6.dp))
+        }
         Icon(
             Icons.Filled.KeyboardArrowRight,
             contentDescription = null,
@@ -428,28 +639,50 @@ private fun SmallButton(
     }
 }
 
-/** 一个网盘的信息块：标题行 + 详情 + 空间占用 */
+/** 一个网盘：彩色图标块 + 账号 + 已连接徽章，下面是空间占用。 */
 @Composable
 private fun ProviderBlock(vm: AppViewModel, provider: ProviderKind) {
+    val isDav = provider == ProviderKind.WEBDAV
+    val account = if (isDav) {
+        vm.accountDefault.ifBlank { vm.serverDefault }
+    } else {
+        vm.oneDriveAccount.ifBlank { "已连接" }
+    }
+    val brandColor = if (isDav) Accent else Color(0xFF2F7BE5)
+
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                when (provider) {
-                    ProviderKind.WEBDAV -> "坚果云 / WebDAV"
-                    ProviderKind.ONEDRIVE -> "OneDrive"
-                },
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f)
-            )
+            BrandIcon(Icons.Filled.Cloud, brandColor)
+            Spacer(Modifier.width(11.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (isDav) "坚果云" else "OneDrive",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    if (isDav) "WebDAV · $account" else account,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            StatusBadge("已连接")
+        }
+        Spacer(Modifier.height(13.dp))
+        if (isDav) DavQuotaRow(vm) else OneDriveQuotaRow(vm)
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
             if (provider == vm.providerKind) {
                 Text(
                     "当前使用中",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary
+                    color = Accent
                 )
-                Spacer(Modifier.width(10.dp))
             }
+            Spacer(Modifier.weight(1f))
             Text(
                 "断开",
                 style = MaterialTheme.typography.labelMedium,
@@ -460,39 +693,6 @@ private fun ProviderBlock(vm: AppViewModel, provider: ProviderKind) {
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             )
         }
-        Spacer(Modifier.height(6.dp))
-        when (provider) {
-            ProviderKind.WEBDAV -> {
-                InfoLine("服务器", vm.serverDefault)
-                InfoLine("账号", vm.accountDefault.ifBlank { "未登录" })
-                Spacer(Modifier.height(6.dp))
-                DavQuotaRow(vm)
-            }
-            ProviderKind.ONEDRIVE -> {
-                InfoLine("账号", vm.oneDriveAccount.ifBlank { "已连接" })
-                Spacer(Modifier.height(6.dp))
-                OneDriveQuotaRow(vm)
-            }
-        }
-    }
-}
-
-/** 「标签  值」一行，值长了就省略，不换行 */
-@Composable
-private fun InfoLine(label: String, value: String) {
-    Row(Modifier.padding(vertical = 1.dp)) {
-        Text(
-            label,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(44.dp)
-        )
-        Text(
-            value,
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
     }
 }
 
@@ -521,7 +721,7 @@ private fun QuotaRow(
             Text(
                 "刷新",
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
+                color = Accent,
                 modifier = Modifier
                     .clip(RoundedCornerShape(6.dp))
                     .clickable(onClick = onRefresh)
@@ -535,7 +735,7 @@ private fun QuotaRow(
                 .fillMaxWidth()
                 .height(4.dp)
                 .clip(RoundedCornerShape(2.dp)),
-            color = MaterialTheme.colorScheme.primary,
+            color = Accent,
             trackColor = MaterialTheme.colorScheme.surfaceVariant
         )
         Spacer(Modifier.height(4.dp))
@@ -584,7 +784,7 @@ private fun DavQuotaRow(vm: AppViewModel) {
             Text(
                 if (capacity > 0L) "容量 ${formatBytes(capacity)}" else "设置容量",
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
+                color = Accent,
                 modifier = Modifier
                     .clip(RoundedCornerShape(6.dp))
                     .clickable { showCapacity = true }
@@ -614,7 +814,7 @@ private fun DavQuotaRow(vm: AppViewModel) {
         Text(
             "每月上传/下载流量额度不通过 WebDAV 公开，剩余额度请在官网查看",
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.primary,
+            color = Accent,
             modifier = Modifier.clickable {
                 runCatching {
                     context.startActivity(
@@ -704,7 +904,7 @@ private fun OneDriveQuotaRow(vm: AppViewModel) {
             Text(
                 if (vm.oneDriveQuotaLoading) "查询中" else "查询",
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
+                color = Accent,
                 modifier = Modifier
                     .clip(RoundedCornerShape(6.dp))
                     .clickable { vm.refreshOneDriveQuota() }

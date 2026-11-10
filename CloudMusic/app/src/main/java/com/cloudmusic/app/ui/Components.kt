@@ -236,14 +236,18 @@ fun AppMenuItem(
  * 这里轨道用半透明色（透出底下的渐变），滑块是白色小圆 + 一丝阴影。
  */
 @Composable
-fun SoftSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+fun SoftSwitch(
+    checked: Boolean,
+    trackColor: Color = MaterialTheme.colorScheme.primary,
+    onCheckedChange: (Boolean) -> Unit,
+) {
     Box(
         Modifier
             .width(46.dp)
             .height(27.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(
-                if (checked) MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+                if (checked) trackColor.copy(alpha = 0.85f)
                 else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
             )
             .clickable { onCheckedChange(!checked) }

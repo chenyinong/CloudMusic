@@ -57,6 +57,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = appRef.repository
 
     var screen by mutableStateOf(Screen.LIBRARY)
+    /** 进入「导入歌单」之前的页面，返回时跳回去（搜歌页或歌单列表页） */
+    var importReturnScreen: Screen = Screen.LIBRARY
     var query by mutableStateOf("")
 
     /** 主题：是否跟随系统深色模式（关闭 = 固定浅色） */

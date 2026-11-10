@@ -1,7 +1,9 @@
 package com.cloudmusic.app.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,21 +19,30 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -45,19 +56,38 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cloudmusic.app.data.MusicHit
 import com.cloudmusic.app.data.ProviderKind
+import com.cloudmusic.app.data.formatBytes
+
+/**
+ * 搜歌页局部强调色。
+ *
+ * 跟设置页用同一套紫，但只在这页生效 —— 全局主色仍是近黑/近白，
+ * 曲库、播放页那些按钮不该跟着变。
+ */
+private val Accent = Color(0xFF6C5CE7)
+private val BadgeGreen = Color(0xFF1E8E57)
+private val BadgeGreenBg = Color(0xFFE6F6EC)
 
 /** 在线搜歌并导入网盘：网盘里没有的歌，搜一首直接传进去。 */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ImportScreen(
     providers: List<ProviderKind>,
+    appVm: AppViewModel,
     onBack: () -> Unit,
     onOpenPlaylistImport: () -> Unit
 ) {
@@ -65,6 +95,8 @@ fun ImportScreen(
     val visible = remember(vm.hits, vm.sourceFilter) { vm.visibleHits }
     // 待确认删除的条目。删的是网盘里的文件，删了就没了，所以先问一句。
     var pendingDelete by remember { mutableStateOf<MusicHit?>(null) }
+    var showDirDialog by remember { mutableStateOf(false) }
+    var dirDraft by remember(vm.dir) { mutableStateOf(vm.dir) }
 
     // 进来的时候重新读一遍「已导入」记录 ——
     // 曲库那边删了文件，这里的记录也得跟着变，不然点「播放」会播一个已经不存在的东西。
@@ -83,13 +115,14 @@ fun ImportScreen(
         CenterAlignedTopAppBar(
             title = {
                 Text(
-                    "导入歌曲到网盘",
+                    "导入歌曲",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Medium
                 )
             },
             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                containerColor = Color.Transparent
+                // 实底：滚动时下面的白卡不会从标题后面透出来
+                containerColor = MaterialTheme.colorScheme.background
             ),
             navigationIcon = {
                 IconButton(onClick = onBack) {
@@ -97,18 +130,13 @@ fun ImportScreen(
                 }
             },
             actions = {
-                // 搜歌和导歌单是两条路，挨着放，用户不用先退回曲库
-                TextButton(onClick = onOpenPlaylistImport) { Text("导歌单") }
+                TextButton(onClick = onOpenPlaylistImport) {
+                    Text("导入歌单", color = Accent)
+                }
             }
         )
 
-        // 整个页面一起滚。
-        //
-        // 之前上半部分（搜索框、目录设置）是固定的，只有下面的结果列表能滑，
-        // 用户想改个目录得先把列表滑到底 —— 屏幕上大半地方是空的。
-        //
-        // 所以整页做成一个大 LazyColumn：表单当第一个 item，结果接着往下排。
-        // （不能用 Column + verticalScroll 包 LazyColumn，那样列表拿不到高度约束。）
+        // 整个页面一起滚，底部留白让开迷你播放器 + 页签栏
         LazyColumn(
             Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = LocalScreenBottomPad.current)
@@ -119,149 +147,74 @@ fun ImportScreen(
                     Modifier
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.background)
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 12.dp)
                 ) {
-                    Column(Modifier.padding(horizontal = 16.dp)) {
-                        // 不用「搜索」按钮了：打字停一下就自动搜，
-                        // 键盘上的搜索键也能立刻搜。
-                        SearchField(
-                            value = vm.keyword,
-                            onValueChange = { vm.onKeywordChange(it) },
-                            placeholder = "例如：稻香 周杰伦",
-                            onImeSearch = { vm.searchNow() },
-                            trailing = {
-                                if (vm.searching) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp),
-                                        strokeWidth = 2.dp
-                                    )
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        // 搜到几条、各个音源什么情况，直接贴在搜索框底下 ——
-                        // 以前这些字在下面，滑一下就看不见了
-                        Text(
-                            when {
-                                vm.searching -> "正在搜…"
-                                vm.notes.isNotEmpty() -> vm.notes.joinToString(" · ")
-                                else -> "输入后自动搜索"
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        // 试听提示（成功 / 失败 / 拉流报错）现在挂在对应结果行里，
-                        // 不再放吸顶区 —— 列表往下滑就看不见了。
-
-                        Spacer(Modifier.height(10.dp))
-                    }
+                    Text(
+                        "IMPORT MUSIC",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.2.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 4.dp, bottom = 12.dp)
+                    )
+                    ImportSearchBar(
+                        keyword = vm.keyword,
+                        searching = vm.searching,
+                        onKeywordChange = { vm.onKeywordChange(it) },
+                        onSearchNow = { vm.searchNow() }
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        when {
+                            vm.searching -> "正在搜…"
+                            vm.hits.isNotEmpty() ->
+                                "找到 ${vm.hits.size} 首" +
+                                    if (vm.notes.isNotEmpty()) " · ${vm.notes.joinToString(" · ")}" else ""
+                            vm.notes.isNotEmpty() -> vm.notes.joinToString(" · ")
+                            else -> "输入后自动搜索"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 4.dp)
+                    )
                 }
             }
 
             item(key = "form") {
-                Column(Modifier.padding(horizontal = 12.dp)) {
-                    var dirText by remember(vm.dir) { mutableStateOf(vm.dir) }
-                    // 「导入到 + 保存目录」收进一张白卡，跟设置页一个结构
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(MaterialTheme.colorScheme.surface)
-                            .padding(14.dp)
-                    ) {
-                        Text(
-                            "导入到",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            // 轻量小胶囊，不要 FilterChip 那种粗边框
-                            providers.forEach { p ->
-                                val selected = vm.providerId == p.id
-                                Text(
-                                    p.shortLabel,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                    // 和曲库页筛选胶囊一致：选中实底黑 + 白字
-                                    color = if (selected) MaterialTheme.colorScheme.onPrimary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(9.dp))
-                                        .background(
-                                            if (selected) MaterialTheme.colorScheme.primary
-                                            else MaterialTheme.colorScheme.surfaceVariant
-                                        )
-                                        .clickable { vm.setProvider(p) }
-                                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                                )
-                            }
+                Column(Modifier.padding(horizontal = 16.dp)) {
+                    SaveTargetCard(
+                        providers = providers,
+                        selectedId = vm.providerId,
+                        dir = vm.dir,
+                        appVm = appVm,
+                        onSelect = { vm.setProvider(it) },
+                        onChangeDir = {
+                            dirDraft = vm.dir
+                            showDirDialog = true
                         }
-
-                        Spacer(Modifier.height(12.dp))
-                        Text(
-                            "保存到网盘的目录",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        // 自绘输入框：浅灰底、无边框、不用浮动 label
-                        BasicTextField(
-                            value = dirText,
-                            onValueChange = { dirText = it },
-                            singleLine = true,
-                            textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                color = MaterialTheme.colorScheme.onSurface
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(44.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .padding(horizontal = 12.dp),
-                            decorationBox = { inner ->
-                                Box(contentAlignment = Alignment.CenterStart) {
-                                    if (dirText.isEmpty()) {
-                                        Text(
-                                            "相对网盘根目录，留空就是根目录",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                    inner()
-                                }
-                            }
-                        )
-                        Spacer(Modifier.height(10.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                "改完记得保存",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.weight(1f)
-                            )
-                            SmallPill("保存目录", MaterialTheme.colorScheme.primary) {
-                                vm.changeDir(dirText.trim())
-                            }
-                        }
-                    }
+                    )
 
                     if (vm.message.isNotBlank()) {
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(10.dp))
                         Text(
                             vm.message,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Accent,
+                            modifier = Modifier.padding(start = 4.dp)
                         )
                     }
                     if (vm.importedCount > 0) {
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(Modifier.height(6.dp))
                         Text(
                             "已导入 ${vm.importedCount} 首，返回曲库重新扫描就能看到",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 4.dp)
                         )
                     }
-                    Spacer(Modifier.height(4.dp))
                 }
             }
 
@@ -271,7 +224,8 @@ fun ImportScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp),
+                            .padding(horizontal = 16.dp)
+                            .padding(top = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         SourceFilter.entries.forEach { f ->
@@ -280,55 +234,18 @@ fun ImportScreen(
                                 "${f.label} ${vm.countOf(f)}",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                // 和「导入到」胶囊、曲库页筛选胶囊一致：选中实底黑 + 白字
-                                color = if (selected) MaterialTheme.colorScheme.onPrimary
+                                color = if (selected) Color.White
                                 else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(9.dp))
+                                    .clip(RoundedCornerShape(10.dp))
                                     .background(
-                                        if (selected) MaterialTheme.colorScheme.primary
+                                        if (selected) Accent
                                         else MaterialTheme.colorScheme.surfaceVariant
                                     )
                                     .clickable { vm.sourceFilter = f }
-                                    .padding(vertical = 7.dp),
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(6.dp))
-                }
-            }
-
-            // 批量导入。
-            //
-            // 网盘那头有一段「等服务端处理」的固定等待（OneDrive 实测 13 秒上下，
-            // 跟文件大小无关）。一首一首导，这段等待要付 N 遍；
-            // 一起导，等待重叠起来，整批就快得多。
-            if (vm.hits.isNotEmpty()) {
-                item(key = "batch") {
-                    val pending = vm.pendingOf(visible)
-                    val running = vm.states.count {
-                        it.value.phase.isNotBlank() && !it.value.done && !it.value.failed
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        SmallPill(
-                            if (pending > 0) "并发导入剩下的 $pending 首" else "这批都导完了",
-                            MaterialTheme.colorScheme.primary
-                        ) {
-                            vm.importAll(visible)
-                        }
-                        if (running > 0) {
-                            Text(
-                                "进行中 $running 首",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    .padding(vertical = 8.dp),
+                                textAlign = TextAlign.Center
                             )
                         }
                     }
@@ -342,18 +259,18 @@ fun ImportScreen(
                         "上次导入：${t.summary()}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
                     )
                 }
             }
 
             if (vm.hits.isEmpty()) {
                 item(key = "empty") {
-                    EmptyHint("搜一首歌，下载后直接传进你的网盘")
+                    EmptyState("搜一首歌，下载后直接传进你的网盘")
                 }
             } else if (visible.isEmpty()) {
                 item(key = "empty-filter") {
-                    EmptyHint("「${vm.sourceFilter.label}」这个源没搜到东西")
+                    EmptyState("「${vm.sourceFilter.label}」这个源没搜到东西")
                 }
             } else {
                 items(visible, key = { it.id }) { hit ->
@@ -374,9 +291,54 @@ fun ImportScreen(
                     )
                 }
             }
-            // 底部留白由 Root 统一处理（迷你播放器 + 导航栏）
-            item(key = "bottom") { Spacer(Modifier.height(16.dp)) }
+
+            item(key = "footer") {
+                Text(
+                    "用自己的方式听歌",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 24.dp)
+                )
+            }
         }
+
+    }
+
+    // 目录「更改」：数据层暂时没有列目录接口，退化成编辑路径而不是做一个假的选择器
+    if (showDirDialog) {
+        AlertDialog(
+            onDismissRequest = { showDirDialog = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            title = { Text("保存目录") },
+            text = {
+                Column {
+                    Text(
+                        "相对网盘根目录，留空就是根目录",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = dirDraft,
+                        onValueChange = { dirDraft = it },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.changeDir(dirDraft.trim())
+                    showDirDialog = false
+                }) { Text("保存", color = Accent) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDirDialog = false }) { Text("取消") }
+            }
+        )
     }
 
     // 删除是拿不回来的操作，先确认
@@ -405,19 +367,380 @@ fun ImportScreen(
     }
 }
 
-/** 结果为空时给一句话提示。 */
+// --------------------------------------------------------------- 顶部搜索区
+
+/** 白色大搜索框 + 右侧紫色圆形「立即搜」按钮。 */
 @Composable
-private fun EmptyHint(text: String) {
-    Box(
-        modifier = Modifier
+private fun ImportSearchBar(
+    keyword: String,
+    searching: Boolean,
+    onKeywordChange: (String) -> Unit,
+    onSearchNow: () -> Unit,
+) {
+    Row(
+        Modifier
             .fillMaxWidth()
-            .height(220.dp),
+            .height(58.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                RoundedCornerShape(18.dp)
+            )
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            Icons.Filled.Search,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .padding(start = 6.dp)
+                .size(20.dp)
+        )
+        Spacer(Modifier.width(10.dp))
+        BasicTextField(
+            value = keyword,
+            onValueChange = onKeywordChange,
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                color = MaterialTheme.colorScheme.onSurface
+            ),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { onSearchNow() }),
+            modifier = Modifier.weight(1f),
+            decorationBox = { inner ->
+                Box(contentAlignment = Alignment.CenterStart) {
+                    if (keyword.isEmpty()) {
+                        Text(
+                            "搜歌名或歌手，例如：稻香 周杰伦",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    inner()
+                }
+            }
+        )
+        if (keyword.isNotEmpty()) {
+            Icon(
+                Icons.Filled.Close,
+                contentDescription = "清空",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .size(18.dp)
+                    .clickable { onKeywordChange("") }
+            )
+            Spacer(Modifier.width(8.dp))
+        }
+        Box(
+            Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(Accent)
+                .clickable(onClick = onSearchNow),
+            contentAlignment = Alignment.Center
+        ) {
+            if (searching) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = Color.White
+                )
+            } else {
+                Icon(
+                    Icons.Filled.Add,
+                    contentDescription = "立即搜索",
+                    tint = Color.White,
+                    modifier = Modifier.size(23.dp)
+                )
+            }
+        }
+    }
+}
+
+// --------------------------------------------------------------- 保存到网盘
+
+/** 白卡：两个网盘二选一 + 剩余空间 + 目录「更改」。 */
+@Composable
+private fun SaveTargetCard(
+    providers: List<ProviderKind>,
+    selectedId: String,
+    dir: String,
+    appVm: AppViewModel,
+    onSelect: (ProviderKind) -> Unit,
+    onChangeDir: () -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                RoundedCornerShape(20.dp)
+            )
+            .padding(16.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Filled.Cloud,
+                contentDescription = null,
+                tint = Accent,
+                modifier = Modifier.size(17.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "保存到网盘",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                "选择目标",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Spacer(Modifier.height(14.dp))
+        ProviderKind.entries.forEach { kind ->
+            ProviderOption(
+                kind = kind,
+                connected = kind in providers,
+                selected = selectedId == kind.id,
+                freeText = freeSpaceText(appVm, kind),
+                onClick = { onSelect(kind) }
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+            modifier = Modifier.padding(vertical = 6.dp)
+        )
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .clickable(onClick = onChangeDir)
+                .padding(vertical = 8.dp, horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "保存目录",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    dir.ifBlank { "网盘根目录" },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Text(
+                "更改",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Medium,
+                color = Accent
+            )
+            Icon(
+                Icons.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = Accent,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+    }
+}
+
+@Composable
+private fun ProviderOption(
+    kind: ProviderKind,
+    connected: Boolean,
+    selected: Boolean,
+    freeText: String,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(14.dp)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(if (selected) Accent.copy(alpha = 0.07f) else Color.Transparent)
+            .border(
+                1.dp,
+                if (selected) Accent.copy(alpha = 0.55f)
+                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                shape
+            )
+            .clickable(onClick = onClick)
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(11.dp))
+                .background(
+                    if (kind == ProviderKind.ONEDRIVE) Color(0xFF2F6FED)
+                    else Color(0xFF7A5AF8)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                if (kind == ProviderKind.ONEDRIVE) Icons.Filled.CloudDownload
+                else Icons.Filled.Cloud,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(21.dp)
+            )
+        }
+        Spacer(Modifier.width(11.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                kind.shortLabel,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                color = if (connected) MaterialTheme.colorScheme.onSurface
+                else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                if (connected) freeText else "未连接 · 去设置里登录",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        if (connected) {
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(BadgeGreenBg)
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier
+                        .size(5.dp)
+                        .clip(CircleShape)
+                        .background(BadgeGreen)
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    "已连接",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = BadgeGreen
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+        }
+        Box(
+            Modifier
+                .size(20.dp)
+                .clip(CircleShape)
+                .background(if (selected) Accent else Color.Transparent)
+                .border(
+                    1.dp,
+                    if (selected) Accent
+                    else MaterialTheme.colorScheme.outlineVariant,
+                    CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            if (selected) {
+                Icon(
+                    Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(13.dp)
+                )
+            }
+        }
+    }
+}
+
+/** 网盘剩余空间；拿不到配额时给一句说明，不编数字。 */
+private fun freeSpaceText(vm: AppViewModel, kind: ProviderKind): String {
+    val free = when (kind) {
+        ProviderKind.WEBDAV -> vm.davQuota?.available
+            ?: (vm.davCapacityBytes - vm.davUsedBytes).takeIf { vm.davCapacityBytes > 0L }
+        ProviderKind.ONEDRIVE -> vm.oneDriveQuota?.remaining
+    }
+    return if (free != null && free > 0L) "剩余 ${formatBytes(free)}" else "剩余空间未知"
+}
+
+// --------------------------------------------------------------- 空态
+
+/** 圆形声波空态：没有图片资源，直接 Canvas 画。 */
+@Composable
+private fun SoundWaveIllustration() {
+    Box(
+        Modifier
+            .size(148.dp)
+            .clip(CircleShape)
+            .background(
+                Brush.radialGradient(
+                    listOf(Accent.copy(alpha = 0.18f), Accent.copy(alpha = 0.03f))
+                )
+            ),
         contentAlignment = Alignment.Center
     ) {
+        Canvas(Modifier.size(104.dp)) {
+            val heights = floatArrayOf(
+                0.24f, 0.42f, 0.66f, 0.88f, 0.56f, 0.78f, 0.46f, 0.30f
+            )
+            val step = size.width / heights.size
+            val barW = step * 0.42f
+            heights.forEachIndexed { i, h ->
+                val barH = size.height * h
+                drawRoundRect(
+                    color = Accent.copy(alpha = 0.42f + 0.5f * h),
+                    topLeft = Offset(
+                        i * step + (step - barW) / 2f,
+                        (size.height - barH) / 2f
+                    ),
+                    size = Size(barW, barH),
+                    cornerRadius = CornerRadius(barW / 2f, barW / 2f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyState(text: String) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        SoundWaveIllustration()
+        Spacer(Modifier.height(18.dp))
+        Text(
+            "还没有歌曲",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(Modifier.height(6.dp))
         Text(
             text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 32.dp)
         )
     }
 }
@@ -425,8 +748,8 @@ private fun EmptyHint(text: String) {
 /**
  * 搜到的一条。
  *
- * 跟曲库的列表一个样式（网易云那种）：方形封面 + 大号歌名 + 灰色歌手，
- * 右边是来源和「导入」按钮。
+ * 跟曲库的列表一个样式：歌名 + 灰色歌手，右边是来源和「导入」按钮。
+ * 试听走整行点击，下载只走右边的按钮。
  */
 @Composable
 private fun HitRow(
@@ -450,33 +773,22 @@ private fun HitRow(
         subtitle = listOf(hit.artist, hit.album)
             .filter { it.isNotBlank() }
             .joinToString(" · "),
-        // 试听提示就显示在这首歌下面，跟着列表一起滚
         note = hint?.text.orEmpty(),
-        // note 默认 error 红（本来是给导入失败用的）；试听中用中性灰，别看着像报错
         noteColor = if (hint?.error == true) null
         else MaterialTheme.colorScheme.onSurfaceVariant,
-        // QQ 的搜索结果不带封面
         showCover = false,
         playing = previewing,
         onClick = {
-            // 已经导进网盘的照旧直接播；其余一律试听（不下载、不写库）。
-            // vm.preview 自己是 toggle：正在试听这首时再点一次就停止并恢复现场。
-            // 下载只走右边的「导入」按钮，别让点一下歌名就把歌往网盘搬。
             if (playable) onPlay() else onPreview()
         }
     ) {
         Column(
             horizontalAlignment = Alignment.End,
-            // 高度必须固定！
-            //
-            // 这一块会在「导入按钮 / 下载中 / 已导入 / 失败」之间切换，
-            // 高度一变整行就变高变矮，下面所有行跟着上移下移 ——
-            // 用户点完「导入」再点一下同一个位置，命中的就成了下一首。
+            // 高度必须固定！状态切换时整行不能忽高忽低，不然下面所有行跟着跳。
             modifier = Modifier.height(52.dp)
         ) {
             Text(
                 buildString {
-                    // 网盘源的搜索结果不带时长，没登录夸克时更拿不到
                     if (hit.durationSec > 0) {
                         append(formatDuration(hit.durationSec))
                         append(" · ")
@@ -490,10 +802,6 @@ private fun HitRow(
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(4.dp))
-            // 右侧只留一个状态控件，高度固定 30dp，状态切换只换内容不换高度。
-            // 试听走整行点击、下载走「导入」按钮，两者不再各占一个控件。
-            // 注意不能加 fillMaxWidth —— 它会在 Row 里先把整行宽度吃光，
-            // 左边 weight(1f) 的歌名歌手就被压成 0 宽度（字直接消失）。
             Box(
                 Modifier.height(30.dp),
                 contentAlignment = Alignment.CenterEnd
@@ -503,7 +811,7 @@ private fun HitRow(
                         Modifier
                             .height(30.dp)
                             .clip(RoundedCornerShape(15.dp))
-                            .background(MaterialTheme.colorScheme.primary)
+                            .background(Accent)
                             .clickable(onClick = onImport)
                             .padding(horizontal = 14.dp),
                         contentAlignment = Alignment.Center
@@ -511,18 +819,16 @@ private fun HitRow(
                         Text(
                             "导入",
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onPrimary
+                            color = Color.White
                         )
                     }
                     st.done -> Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            // 「已导入」点一下就是播放，标出来免得以为还要再导一次
                             if (playable) "已导入 · 播放" else st.phase,
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = Accent,
                             maxLines = 1
                         )
-                        // 导错了要能删掉 —— 删的是网盘里的文件本体
                         if (playable) {
                             Spacer(Modifier.width(2.dp))
                             IconButton(
@@ -547,8 +853,6 @@ private fun HitRow(
                         }
                     }
                     st.failed -> Text(
-                        // 失败原因放右边这块固定区域，别塞到左边第三行 ——
-                        // 左边多一行，整行高度就变了，列表会跟着跳
                         st.message.ifBlank { st.phase },
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.error,
