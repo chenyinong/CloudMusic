@@ -128,6 +128,12 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
     private var queueOrder: List<String> = emptyList()
     private var resolveJob: Job? = null
 
+    init {
+        // 播放列表面板点了还没解析的占位歌：在线解析这一首，再精准跳过去。
+        // 以前 jumpTo 对占位歌只会「跳到后面第一首能播的」，点 A 播出别的歌。
+        player.onUnresolvedPick = { track -> onQueuePlaceholderPicked(track) }
+    }
+
     var phases by mutableStateOf<Map<String, TrackPhase>>(emptyMap())
         private set
 
@@ -503,6 +509,47 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
+     * 播放列表面板点了占位歌（还没解析出直链的那首）。
+     *
+     * 解析这一首的直链，原地插进媒体队列再跳过去 —— 和点歌单行是同一个语义，
+     * 只是入口从行点击变成了播放列表。不是这张歌单的队列就不接管。
+     */
+    private fun onQueuePlaceholderPicked(track: Track): Boolean {
+        val savedKey = track.key.removePrefix("online:")
+        val idx = queueOrder.indexOf(savedKey)
+        if (idx < 0) return false
+        val saved = tracks.firstOrNull { it.key == savedKey } ?: return false
+        onlineJob?.cancel()
+        onlineJob = viewModelScope.launch {
+            onlineLoadingKey = savedKey
+            val result = try {
+                appRef.playlistImport.resolveForOnlinePlay(
+                    saved.toPlaylistTrack(), appRef.quarkClient.loggedIn
+                )
+            } catch (e: Exception) {
+                OnlineResolution()
+            }
+            // 解析过就记下来，别让预解析再花几秒重试同一首
+            resolvedKeys.add(savedKey)
+            onlineLoadingKey = null
+            val candidate = result.candidate
+            if (candidate == null || candidate.audioUrl.isBlank()) {
+                onlineHint = OnlineHint(
+                    savedKey,
+                    onlineFailText(result.reason ?: OnlineFailReason.NO_SAME_TITLE),
+                    error = true
+                )
+                return@launch
+            }
+            val onlineTrack = buildOnlineTrack(savedKey, candidate)
+            // 原地插进媒体队列（不打断当前播放），再精准跳到这一首
+            player.replaceMediaItem(idx, onlineTrack)
+            player.jumpTo(onlineTrack)
+        }
+        return true
+    }
+
+    /**
      * 清掉行内在线试听 UI、取消没跑完的解析。
      *
      * 以前这里会「回放试听前的旧队列」，离开页面要么跳到别的歌、
@@ -517,6 +564,7 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         // 只收 UI 和协程：队列归播放器，别在这里动
         stopOnline()
+        player.onUnresolvedPick = null
         super.onCleared()
     }
 

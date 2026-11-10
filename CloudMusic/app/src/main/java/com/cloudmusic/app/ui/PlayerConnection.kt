@@ -49,6 +49,12 @@ class PlayerConnection(private val context: Context) {
         private set
 
     /**
+     * 播放列表点了还没解析出直链的占位歌（歌单在线混播场景）。
+     * 返回 true 表示上层（歌单页）接管、去在线解析这一首 —— 播放器别自己乱跳。
+     */
+    var onUnresolvedPick: ((Track) -> Boolean)? = null
+
+    /**
      * 循环模式：列表循环 / 单曲循环 / 不循环。
      * 跟网易云的控制栏一致，点一下切一个。
      */
@@ -289,11 +295,17 @@ class PlayerConnection(private val context: Context) {
         val c = controller ?: return
         val idx = playlist.indexOfFirst { it.key == track.key }
         if (idx < 0) return
-        // 占位歌不在媒体队列里；点它就跳到它后面第一首能播的
-        val mediaIdx = mediaToLogical.indexOf(idx).takeIf { it >= 0 }
-            ?: mediaToLogical.indexOfFirst { it > idx }.takeIf { it >= 0 }
-            ?: return
-        c.seekTo(mediaIdx, 0L)
+        val mediaIdx = mediaToLogical.indexOf(idx)
+        if (mediaIdx >= 0) {
+            c.seekTo(mediaIdx, 0L)
+            c.play()
+            return
+        }
+        // 占位歌还没解析出直链：先让上层接管去在线解析（歌单混播），
+        // 没人接管才退回旧行为 —— 跳到它后面第一首能播的
+        if (onUnresolvedPick?.invoke(track) == true) return
+        val fallback = mediaToLogical.indexOfFirst { it > idx }.takeIf { it >= 0 } ?: return
+        c.seekTo(fallback, 0L)
         c.play()
     }
 
