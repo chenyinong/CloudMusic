@@ -74,8 +74,8 @@ import com.cloudmusic.app.data.formatBytes
  */
 /** 设置页局部强调色，避免影响其它页面的按钮/选中态 */
 private val Accent = Color(0xFF1A1A1A)
-private val AccentDeep = Color(0xFF2A2A2A)
-private val AccentDarker = Color(0xFF121212)
+private val AccentDeep = Color(0xFF2E2A55)
+private val AccentDarker = Color(0xFF1B1A33)
 private val BadgeGreen = Color(0xFF1E8E57)
 private val BadgeGreenBg = Color(0xFFE6F6EC)
 
@@ -194,7 +194,7 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
                 trailing = if (vm.quarkLoggedIn) "已登录" else "未登录"
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    BrandIcon(Icons.Filled.CloudDownload, Color(0xFF1A1A1A))
+                    BrandIcon(Icons.Filled.CloudDownload, Color(0xFF7A5AF8))
                     Spacer(Modifier.width(11.dp))
                     Text(
                         "夸克网盘",
@@ -433,7 +433,7 @@ private fun QuotaOverviewCard(vm: AppViewModel) {
                             .fillMaxWidth(ratio)
                             .height(5.dp)
                             .clip(RoundedCornerShape(3.dp))
-                            .background(Color(0xFF8A8A8A))
+                            .background(Color(0xFF9B8BFF))
                     )
                 }
             }
@@ -648,7 +648,7 @@ private fun ProviderBlock(vm: AppViewModel, provider: ProviderKind) {
     } else {
         vm.oneDriveAccount.ifBlank { "已连接" }
     }
-    val brandColor = Color(0xFF1A1A1A)
+    val brandColor = if (isDav) Accent else Color(0xFF2F7BE5)
 
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {

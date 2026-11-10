@@ -591,8 +591,8 @@ private fun ProviderOption(
                 .size(38.dp)
                 .clip(RoundedCornerShape(11.dp))
                 .background(
-                    if (kind == ProviderKind.ONEDRIVE) Color(0xFF1A1A1A)
-                    else Color(0xFF1A1A1A)
+                    if (kind == ProviderKind.ONEDRIVE) Color(0xFF2F6FED)
+                    else Color(0xFF7A5AF8)
                 ),
             contentAlignment = Alignment.Center
         ) {
