@@ -1,6 +1,5 @@
 package com.cloudmusic.app.ui
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -41,14 +40,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -62,7 +57,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cloudmusic.app.App
 import com.cloudmusic.app.data.Track
-import kotlin.math.abs
 
 /**
  * 封面页：全出血封面卡片（iTunes 查到的真封面），
@@ -176,59 +170,6 @@ private fun rememberCoverBitmap(url: String?): ImageBitmap? {
         app.coverRepository.artwork(url)?.let { bmp = it.asImageBitmap() }
     }
     return bmp
-}
-
-/**
- * 查不到封面时的程序化占位画：
- * 歌名哈希选调色板 → 渐变天 + 圆日 + 三层山影。
- * 每首歌构图略有不同，但整体风格统一。
- */
-@Composable
-private fun GeneratedCover(seed: String, modifier: Modifier = Modifier) {
-    val palette = coverColors(seed)
-    val variant = abs(seed.hashCode())
-    Canvas(modifier) {
-        val w = size.width
-        val h = size.height
-
-        // 天空：调色板深色在上、亮色在下
-        drawRect(
-            Brush.verticalGradient(
-                colors = listOf(palette[1], palette[0]),
-                startY = 0f, endY = h
-            )
-        )
-
-        // 圆日：位置大小随歌名哈希微调
-        val sunR = h * (0.13f + (variant % 40) / 400f)
-        val sunX = w * (0.30f + (variant % 30) / 100f)
-        val sunY = h * (0.22f + (variant % 17) / 100f)
-        drawCircle(
-            Color(0xFFF6EFD4).copy(alpha = 0.15f),
-            radius = sunR * 2.0f,
-            center = Offset(sunX, sunY)
-        )
-        drawCircle(
-            Color(0xFFF6EFD4).copy(alpha = 0.95f),
-            radius = sunR,
-            center = Offset(sunX, sunY)
-        )
-
-        // 山影：三层叠弧，一层比一层深、一层比一层近
-        drawHill(lerp(palette[1], Color.Black, 0.25f), w * -0.15f, h * 0.88f, w * 0.75f, h * 0.60f)
-        drawHill(lerp(palette[1], Color.Black, 0.40f), w * 0.08f, h * 0.92f, w * 0.85f, h * 0.62f)
-        drawHill(lerp(palette[1], Color.Black, 0.55f), w * 0.55f, h * 0.96f, w * 0.80f, h * 0.66f)
-    }
-}
-
-/** 一座山：从底线拱起来的抛物线，闭合填色。 */
-private fun DrawScope.drawHill(color: Color, left: Float, baseY: Float, width: Float, height: Float) {
-    val path = Path().apply {
-        moveTo(left, baseY)
-        quadraticBezierTo(left + width / 2f, baseY - height, left + width, baseY)
-        close()
-    }
-    drawPath(path, color)
 }
 
 /** 歌词页：跟网易云一样，当前行放大加粗居中。 */

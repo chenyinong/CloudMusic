@@ -22,7 +22,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
@@ -301,9 +300,8 @@ fun LibraryScreen(
                     }
                 }
             } else {
-                itemsIndexed(filtered, key = { _, t -> t.key }) { idx, track ->
+                itemsIndexed(filtered, key = { _, t -> t.key }) { _, track ->
                     TrackRow(
-                        index = idx + 1,
                         track = track,
                         showProvider = providers.size > 1,
                         playing = vm.player.currentTrack?.key == track.key,
@@ -454,7 +452,6 @@ private fun LibraryHero(trackCount: Int, providerCount: Int, artistCount: Int) {
  */
 @Composable
 private fun TrackRow(
-    index: Int,
     track: Track,
     showProvider: Boolean,
     playing: Boolean,
@@ -473,23 +470,15 @@ private fun TrackRow(
     }
     SongRow(
         coverSeed = track.album.ifBlank { track.title },
+        coverTrack = track,
         title = track.title,
         subtitle = sub,
         playing = playing,
-        index = index,
         badge = formatBadge(track.fileName),
         showDivider = false,
         onClick = onClick
     ) {
-        // QQ：右边先一个「加入队列」，再一个竖三点
-        IconButton(onClick = onEnqueue, modifier = Modifier.size(30.dp)) {
-            Icon(
-                Icons.Filled.Add,
-                contentDescription = "加入播放队列",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(19.dp)
-            )
-        }
+        // 行尾只留竖三点：加入队列收进菜单里，别占一列
         Box {
             IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(30.dp)) {
                 Icon(

@@ -28,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.cloudmusic.app.data.Track
 
 /**
  * 通用歌曲行，两种形态：
@@ -58,6 +59,8 @@ fun SongRow(
     badge: String? = null,
     showDivider: Boolean = true,
     showCover: Boolean = true,
+    /** 有曲目就查 iTunes 真封面，查不到自动回落到渐变占位画 */
+    coverTrack: Track? = null,
     trailing: @Composable (() -> Unit)? = null,
 ) {
     Column(modifier) {
@@ -83,7 +86,12 @@ fun SongRow(
                 }
             } else if (showCover) {
                 Box(Modifier.size(56.dp)) {
-                    GradientCover(seed = coverSeed, size = 56.dp, corner = 10.dp)
+                    CoverThumb(
+                        track = coverTrack,
+                        seed = coverSeed,
+                        size = 56.dp,
+                        corner = 10.dp
+                    )
                     if (playing) {
                         // 正在放的这首，封面右下角挂个标记
                         Box(

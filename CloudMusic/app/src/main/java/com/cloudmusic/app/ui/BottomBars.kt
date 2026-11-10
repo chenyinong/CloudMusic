@@ -211,7 +211,8 @@ fun MiniPlayerBar(
                         .padding(start = 14.dp, end = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    GradientCover(
+                    CoverThumb(
+                        track = player.currentTrack,
                         seed = player.currentTrack?.album?.takeIf { it.isNotBlank() } ?: title,
                         size = 40.dp,
                         corner = 20.dp,

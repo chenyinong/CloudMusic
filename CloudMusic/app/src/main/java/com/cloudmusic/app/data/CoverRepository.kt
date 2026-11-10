@@ -4,6 +4,9 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.LruCache
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -41,22 +44,29 @@ class CoverRepository(
         }
     }
 
-    /** 本会话「查过但没有」的曲目（负缓存） */
-    private val misses = Collections.synchronizedSet(mutableSetOf<String>())
+    /**
+     * 本会话的 URL 缓存（值 "" = 查过但没有），列表滚动时每行重组也不会重复打库。
+     * 同时兼作负缓存，下次启动还能重试。
+     */
+    private val urlCache = Collections.synchronizedMap(mutableMapOf<String, String>())
 
-    /** 查封面：SQLite 缓存 → iTunes。失败返回 null，UI 画程序生成的占位图。 */
+    /** 全局串行 + 最小间隔：iTunes 限约 20 次/分钟，滚动列表时按节奏排队查。 */
+    private val searchMutex = Mutex()
+    private var lastSearchAt = 0L
+
+    /** 查封面：内存 → SQLite → iTunes（带限流）。失败返回 null，UI 画占位图。 */
     suspend fun load(track: Track): String? = withContext(Dispatchers.IO) {
-        db.coverUrl(track.key)?.let { return@withContext it }
-        if (track.key in misses) return@withContext null
+        urlCache[track.key]?.let { return@withContext it.ifBlank { null } }
+        db.coverUrl(track.key)?.let {
+            urlCache[track.key] = it
+            return@withContext it
+        }
 
         val url = searchItunes(track.title.trim(), track.artist.trim())
-        if (url == null) {
-            misses.add(track.key)
-            null
-        } else {
-            db.saveCover(track.key, url)
-            url
-        }
+        // 查过就记下来，没查到也别在同一次启动里反复打接口
+        urlCache[track.key] = url ?: ""
+        if (url != null) db.saveCover(track.key, url)
+        url
     }
 
     /** 下载并解码封面位图，带内存缓存（600x600 的图来回切歌不用重新下）。 */
@@ -77,7 +87,7 @@ class CoverRepository(
 
     private data class Hit(val title: String, val artist: String, val artwork: String)
 
-    private fun searchItunes(title: String, artist: String): String? {
+    private suspend fun searchItunes(title: String, artist: String): String? {
         if (title.isBlank()) return null
         val wantTitle = normalize(title)
         val wantArtist = normalize(artist)
@@ -90,6 +100,7 @@ class CoverRepository(
         // 中文歌走 CN 店，欧美/冷门走 US 店，两店各试一轮
         for (kw in keywords) {
             for (country in listOf("CN", "US")) {
+                throttleSearch()
                 val best = hits(kw, country)
                     .map { it to score(normalize(it.title), normalize(it.artist), wantTitle, wantArtist) }
                     .filter { it.second >= MATCH_THRESHOLD }
@@ -99,6 +110,15 @@ class CoverRepository(
             }
         }
         return null
+    }
+
+    /** 任意两次 iTunes 检索至少隔 3 秒（20 次/分钟），全局串行不并发闯限。 */
+    private suspend fun throttleSearch() {
+        searchMutex.withLock {
+            val wait = 3000L - (System.currentTimeMillis() - lastSearchAt)
+            if (wait > 0) delay(wait)
+            lastSearchAt = System.currentTimeMillis()
+        }
     }
 
     private fun hits(keyword: String, country: String): List<Hit> {
