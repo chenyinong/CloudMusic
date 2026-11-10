@@ -22,14 +22,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -52,6 +57,9 @@ import com.cloudmusic.app.data.playlist.SavedPlaylist
 /**
  * 「我的歌单」列表，抄的是网易云音乐的用法：
  * 这里只列歌单，点进去才看到里面的歌，想听哪首点哪首。
+ *
+ * 每张歌单是一张圆角白卡：左边程序化封面（不用联网，也不用给歌单表加字段），
+ * 右边歌单名、曲目信息、导入进度条，行尾 ⋮ 可以打开或删除歌单。
  *
  * 滚动方式跟歌单详情页一致：整页一个列表，
  * 头部（大标题、统计、导入按钮）跟着一起滑走，滑走后顶栏顶上标题；
@@ -170,10 +178,11 @@ fun PlaylistListScreen(
                     }
                 } else {
                     items(vm.visiblePlaylists, key = { it.key }) { p ->
-                        PlaylistRow(
+                        PlaylistCard(
                             playlist = p,
                             imported = vm.importedCounts[p.key] ?: 0,
-                            onClick = { onOpenPlaylist(p.key) }
+                            onClick = { onOpenPlaylist(p.key) },
+                            onDelete = { vm.delete(p.key) }
                         )
                     }
                 }
@@ -232,49 +241,148 @@ private fun PlaylistListHeader(
     }
 }
 
+/**
+ * 一张歌单一张白卡。
+ *
+ * 封面直接复用曲库那套程序化插画 [GeneratedCover]：按歌单名生成，
+ * 不用联网，也不用给歌单表加封面字段；以后拿到真实封面 URL 时，
+ * 只要把这块换掉就行。
+ */
 @Composable
-private fun PlaylistRow(
+private fun PlaylistCard(
     playlist: SavedPlaylist,
     imported: Int,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDelete: () -> Unit,
 ) {
-    // 和「我的」列表同一节奏：平铺、不加白卡，封面小一号
-    Row(
+    var menuOpen by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+
+    Box(
         Modifier
             .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 5.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surface)
             .clickable(onClick = onClick)
-            .padding(start = 16.dp, end = 12.dp, top = 9.dp, bottom = 9.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(10.dp)
     ) {
-        GradientCover(playlist.name, size = 40.dp, corner = 8.dp)
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                playlist.name,
-                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(3.dp))
-            val sub = buildString {
-                append("${playlist.trackCount} 首")
-                append(" · ${playlist.platform.label}")
-                if (imported > 0) append(" · 已导入 $imported 首")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(60.dp)
+                    .clip(RoundedCornerShape(10.dp))
+            ) {
+                GeneratedCover(seed = playlist.name, modifier = Modifier.fillMaxSize())
+                Text(
+                    playlist.platform.label,
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                    color = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(5.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(Color.Black.copy(alpha = 0.42f))
+                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                )
             }
-            Text(
-                sub,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+
+            Spacer(Modifier.width(11.dp))
+
+            Column(Modifier.weight(1f)) {
+                Text(
+                    playlist.name,
+                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 14.sp),
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(4.dp))
+                val sub = buildString {
+                    append("${playlist.trackCount} 首")
+                    append(" · ${playlist.platform.label}")
+                    if (imported > 0) append(" · 已导入 $imported 首")
+                }
+                Text(
+                    sub,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(7.dp))
+                val ratio = if (playlist.trackCount > 0) {
+                    (imported.toFloat() / playlist.trackCount).coerceIn(0f, 1f)
+                } else 0f
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    if (ratio > 0f) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth(ratio)
+                                .height(3.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)
+                                )
+                        )
+                    }
+                }
+            }
+
+            Box {
+                IconButton(
+                    onClick = { menuOpen = true },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.MoreVert,
+                        contentDescription = "更多",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+                AppDropdownMenu(
+                    expanded = menuOpen,
+                    onDismissRequest = { menuOpen = false }
+                ) {
+                    AppMenuHeader(playlist.name)
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                    )
+                    AppMenuItem(text = "打开歌单", icon = Icons.Filled.KeyboardArrowRight) {
+                        menuOpen = false
+                        onClick()
+                    }
+                    AppMenuItem(text = "删除歌单", icon = Icons.Filled.Delete) {
+                        menuOpen = false
+                        confirmDelete = true
+                    }
+                }
+            }
         }
-        Icon(
-            Icons.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(16.dp)
+    }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            title = { Text("删除这张歌单？") },
+            text = { Text("只删「${playlist.name}」的清单，网盘里已经导入的歌不会动。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    onDelete()
+                }) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text("取消") }
+            }
         )
     }
 }
