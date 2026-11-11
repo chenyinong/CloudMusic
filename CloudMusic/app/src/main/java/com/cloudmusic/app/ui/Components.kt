@@ -47,6 +47,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.cloudmusic.app.data.Track
 import kotlin.math.absoluteValue
 
 /**
@@ -131,11 +132,12 @@ fun AppDropdownMenu(
     expanded: Boolean,
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
+    width: Dp = 208.dp,
     content: @Composable ColumnScope.() -> Unit
 ) {
     /**
-     * 不套 Material 的 DropdownMenu 了：它内部自带 elevation（又厚又泛绿），
-     * 这个版本还没法改形状/颜色。自己画 Popup，样式完全可控。
+     * 自绘 Popup（不套 Material 默认菜单），样式完全可控：
+     * 大圆角 + 柔和投影的白卡片，项高舒展 —— 全 app 的 popmenu 统一风格。
      *
      * 定位跟 M3 一样：右边缘对齐触发按钮的右边缘、贴在按钮下面，
      * 并 clamp 在屏幕内，靠右的按钮菜单往左展开。
@@ -167,15 +169,10 @@ fun AppDropdownMenu(
                 modifier
                     // 固定宽度：Popup 自己没有宽度约束，不写死的话
                     // 菜单项的 fillMaxWidth() 会把菜单撑到整屏
-                    .width(168.dp)
+                    .width(width)
+                    .shadow(8.dp, RoundedCornerShape(12.dp))
                     .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.surface)
-                    // 不用阴影，一条极淡的描边就跟背景分开了，干净
-                    .border(
-                        1.dp,
-                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
-                        RoundedCornerShape(12.dp)
-                    )
                     .padding(vertical = 6.dp),
                 content = content
             )
@@ -183,50 +180,121 @@ fun AppDropdownMenu(
     }
 }
 
-/** 菜单顶部的一行小标题（比如当前歌曲名） */
+/**
+ * 菜单顶部信息行：歌曲真实封面（可选）+ 标题 + 副标题（可选）。
+ * 封面走 [CoverThumb]：优先 SQLite 缓存 / 在线检索到的真封面，
+ * 没查到（或还没下完）时自动回退到程序化占位画。
+ * 下方分割线由调用处自行添加。
+ *
+ * @param track 当前歌曲；歌单菜单传歌单借用的那首歌即可
+ * @param coverSeed 占位画的取色种子，同时也是「是否显示封面」的开关
+ */
 @Composable
-fun AppMenuHeader(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 8.dp)
-    )
+fun AppMenuHeader(
+    text: String,
+    subtitle: String? = null,
+    coverSeed: String? = null,
+    track: Track? = null,
+) {
+    Row(
+        Modifier.padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (coverSeed != null || track != null) {
+            CoverThumb(
+                track = track,
+                seed = coverSeed ?: text,
+                size = 40.dp,
+                corner = 9.dp
+            )
+            Spacer(Modifier.width(10.dp))
+        }
+        Column(Modifier.weight(1f).padding(vertical = 1.dp)) {
+            Text(
+                text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (subtitle != null) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
 }
 
-/** 菜单里的一项：图标 + 文字，行高收紧 */
+/**
+ * 菜单里的一项：图标 + 主文字（+ 可选副标题），右端可挂 trailing（如箭头）。
+ * highlight=true 给淡紫高亮背景（主操作项）；danger=true 文字红色。
+ */
 @Composable
 fun AppMenuItem(
     text: String,
     icon: ImageVector? = null,
+    subtitle: String? = null,
+    highlight: Boolean = false,
+    danger: Boolean = false,
+    trailing: (@Composable () -> Unit)? = null,
     onClick: () -> Unit
 ) {
+    val contentColor = if (danger) MaterialTheme.colorScheme.error
+    else MaterialTheme.colorScheme.onSurface
     Row(
         Modifier
             .fillMaxWidth()
+            .padding(horizontal = 6.dp, vertical = 2.dp)
             .clip(RoundedCornerShape(8.dp))
+            .background(if (highlight) HighlightPurple else Color.Transparent)
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (icon != null) {
             Icon(
                 icon,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(17.dp)
+                tint = if (danger) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
             )
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(10.dp))
         }
-        Text(
-            text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface
-        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = contentColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (subtitle != null) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        if (trailing != null) {
+            Spacer(Modifier.width(8.dp))
+            trailing()
+        }
     }
 }
+
+/** 菜单主操作项的淡紫高亮底色（呼应截图风格）。 */
+private val HighlightPurple = Color(0xFFEDE7FB)
 
 /**
  * 自绘开关。

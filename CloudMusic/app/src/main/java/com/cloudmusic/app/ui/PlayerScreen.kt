@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -113,34 +114,39 @@ fun PlayerScreen(
 
     // 菜单内容：顶栏和底部共用一份
     val moreMenuContent: @Composable () -> Unit = {
-        AppMenuHeader(title.ifBlank { "正在播放" })
+        AppMenuHeader(
+            title.ifBlank { "正在播放" },
+            subtitle = artist.ifBlank { null },
+            coverSeed = if (title.isNotBlank()) title else "music",
+            track = track
+        )
         HorizontalDivider(
             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
         )
         AppMenuItem(
             text = "歌曲信息",
-            icon = Icons.Filled.Info
+            icon = Icons.Outlined.Info
         ) {
             moreFrom = 0
             showInfo = true
         }
         AppMenuItem(
             text = "播放列表（${conn.queue.size}）",
-            icon = Icons.Filled.QueueMusic
+            icon = Icons.Outlined.QueueMusic
         ) {
             moreFrom = 0
             showQueue = true
         }
         AppMenuItem(
             text = "投屏",
-            icon = Icons.Filled.Cast
+            icon = Icons.Outlined.Cast
         ) {
             moreFrom = 0
             showDlna = true
         }
         AppMenuItem(
             text = "定时关闭",
-            icon = Icons.Filled.Schedule
+            icon = Icons.Outlined.Schedule
         ) {
             moreFrom = 0
             showSleep = true

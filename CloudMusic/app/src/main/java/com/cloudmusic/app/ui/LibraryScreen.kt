@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
@@ -513,48 +514,50 @@ private fun TrackRow(
                 expanded = menuOpen,
                 onDismissRequest = { menuOpen = false }
             ) {
-                AppMenuHeader(track.title)
+                AppMenuHeader(track.title, coverSeed = track.title, track = track)
                 HorizontalDivider(
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
                 )
                 AppMenuItem(
                     text = "播放",
-                    icon = Icons.Filled.PlayArrow
+                    icon = Icons.Outlined.PlayArrow,
+                    highlight = true
                 ) {
                     menuOpen = false
                     onClick()
                 }
                 AppMenuItem(
                     text = "加入播放队列",
-                    icon = Icons.Filled.PlaylistAdd
+                    icon = Icons.Outlined.PlaylistAdd
                 ) {
                     menuOpen = false
                     onEnqueue()
                 }
                 AppMenuItem(
                     text = "歌曲信息",
-                    icon = Icons.Filled.Info
+                    icon = Icons.Outlined.Info
                 ) {
                     menuOpen = false
                     onShowInfo()
                 }
                 AppMenuItem(
                     text = "设置封面",
-                    icon = Icons.Filled.Image
+                    icon = Icons.Outlined.Image
                 ) {
                     menuOpen = false
                     onSetCover()
                 }
                 AppMenuItem(
                     text = "重新查找封面",
-                    icon = Icons.Filled.Refresh
+                    icon = Icons.Outlined.Refresh
                 ) {
                     menuOpen = false
                     onRefreshCover()
                 }
                 AppMenuItem(
                     text = "用文件标签修正歌名/歌手",
-                    icon = Icons.Filled.GraphicEq
+                    icon = Icons.Outlined.GraphicEq,
+                    subtitle = "修改歌曲名与歌手信息"
                 ) {
                     menuOpen = false
                     onCorrectTags()
