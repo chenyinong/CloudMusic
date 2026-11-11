@@ -51,6 +51,13 @@ data class AudioCandidate(
     /** 只下到了试听片段（平台版权限制） */
     val partial: Boolean = false,
     /**
+     * 歌单里这首的目标时长（秒），只有「按歌单精确找」时才有值。
+     *
+     * 下歌吧的搜索结果不带时长，得等 resolve 拿到夸克文件的真实时长，
+     * 再跟它比一次才知道是不是 30 秒试听片段（见 LiumingyeAudioSource）。
+     */
+    val targetDurationSec: Int = 0,
+    /**
      * 下载这个候选时要额外带的请求头。
      *
      * 夸克的直链是**会话绑定**的：URL 里那个 `token=5-...` 要跟登录 Cookie 对得上，

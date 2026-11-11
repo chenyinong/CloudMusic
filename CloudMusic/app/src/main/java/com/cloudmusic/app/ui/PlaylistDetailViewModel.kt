@@ -169,6 +169,12 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
         private set
 
     /**
+     * 所有音源都只给到试听片段的歌（歌单条目 key）。
+     * 这些行要挂一句「只有试听片段」，别让用户以为 App 播错版本。
+     */
+    private var partialKeys by mutableStateOf(emptySet<String>())
+
+    /**
      * 当前播放器里那首歌，对应到这张歌单的哪个条目。
      *
      * 在线混播的歌 key 是 "online:<条目key>"；已下载的歌用网盘文件
@@ -190,14 +196,22 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
         get() = player.currentTrack?.key?.startsWith("online:") == true
 
     /**
-     * 给列表行取提示：只有出错才给。
+     * 给列表行取提示：只有出错 / 只有片段才给。
      *
      * 播放中不再挂「在线播放中 …」那行字 —— 封面角标、歌名染色和右侧
      * 暂停按钮已经能表明状态，多一行提示反而把列表撑高。
-     * 解析/播放失败的原因仍留在它自己那一行，并带「去别处找」的出口。
+     * 解析失败、播放失败、只剩试听片段这几种异常仍留在对应行，
+     * 并带「去别处找」的出口。
      */
     fun hintFor(key: String): OnlineHint? {
         onlineHint?.takeIf { it.error && it.key == key }?.let { return it }
+        if (key in partialKeys) {
+            return OnlineHint(
+                key,
+                "只有试听片段 · 几个音源都没拿到完整版，可导入到网盘或点右侧「去别处找」",
+                error = true
+            )
+        }
         if (key != currentPlaylistKey || !currentIsOnline) return null
         val err = playbackError ?: return null
         return OnlineHint(
@@ -220,6 +234,7 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
 
     fun load(key: String) {
         loading = true
+        partialKeys = emptySet()
         cloudReady = appRef.quarkClient.loggedIn
         viewModelScope.launch {
             val pl = withContext(Dispatchers.IO) { store.playlist(key) }
@@ -381,6 +396,7 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
         hintKey: String? = null,
     ) {
         clearOnlineUi()
+        partialKeys = emptySet()   // 重新起播，旧的片段标记不算数
         appRef.player.clearError()
         if (hintKey != null) onlineLoadingKey = hintKey
         pendingByKey.clear()
@@ -407,6 +423,7 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
                 val c = result.candidate
                 if (c != null && c.audioUrl.isNotBlank()) {
                     queue[startIndex] = buildOnlineTrack(saved.key, c)
+                    if (result.partialOnly) partialKeys = partialKeys + saved.key
                 } else {
                     startFailure = result.reason ?: OnlineFailReason.NO_SAME_TITLE
                 }
@@ -457,6 +474,7 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
             resolvedKeys.add(key)
             val c = result.candidate ?: continue
             if (c.audioUrl.isBlank()) continue
+            partialKeys = if (result.partialOnly) partialKeys + key else partialKeys - key
             player.replaceMediaItem(i, buildOnlineTrack(key, c))
         }
         // 全部解析完就收摊，别一直挂着

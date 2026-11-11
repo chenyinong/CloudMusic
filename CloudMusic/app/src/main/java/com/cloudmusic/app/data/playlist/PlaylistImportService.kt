@@ -27,6 +27,8 @@ data class OnlineResolution(
     val reason: OnlineFailReason? = null,
     /** 命中的是「同名异歌手」的放宽候选，日志和 UI 要能区分 */
     val relaxed: Boolean = false,
+    /** 所有源都只有试听片段，这个是兜底返回的 —— UI 要提示用户 */
+    val partialOnly: Boolean = false,
 )
 
 /**
@@ -59,6 +61,12 @@ class PlaylistImportService(
 
         /** 放宽匹配每个源最多再试几个候选，别让一首歌发十几个请求。 */
         private const val MAX_RELAXED_PER_SOURCE = 3
+
+        /**
+         * 歌单没给时长时，用绝对时长兜底判片段：正常单曲不会短于 45 秒，
+         * 30 秒上下的基本都是平台试听片段。
+         */
+        private const val ABSOLUTE_PARTIAL_MAX_SEC = 45
 
         /** 没有音源时给用户的兜底搜索链接（实测该站搜索参数是 q）。 */
         private const val FALLBACK_SEARCH = "https://so.liumingye.cn/search?q="
@@ -161,18 +169,40 @@ class PlaylistImportService(
             )
         }
 
+        // 片段只记下来、不当成结果返回：
+        // 实测《野子 (Live)》第一条命中的就是 27 秒的 aac，以前一命中直接返回，
+        // 后面 5 条同名同歌手候选和另外两个源全都不试，播出来就是 30 秒试听。
+        var partialHit: AudioCandidate? = null
+
         // 两遍走完才放宽：宁可先让别的源用严格口径命中，也别一上来就播翻唱
         for (pass in 0..1) {
             val bySource = if (pass == 0) strictBySource else relaxedBySource
             for (source in ordered) {
                 for (c in bySource[source.id].orEmpty()) {
                     val hit = tryResolve(source, c) ?: continue
+                    if (isPartialHit(hit, track)) {
+                        if (partialHit == null) {
+                            partialHit = hit
+                            Log.d(
+                                "CM/Resolve",
+                                "「${track.title}」[${source.id}] 只有试听片段 " +
+                                    "${hit.durationSec}s（目标 ${track.durationSec}s），继续找完整版"
+                            )
+                        }
+                        continue
+                    }
                     if (pass == 1) {
                         Log.d("CM/Resolve", "放宽匹配命中「${c.title}」-「${c.artist}」")
                     }
                     return@withContext OnlineResolution(hit, relaxed = pass == 1)
                 }
             }
+        }
+
+        // 所有源都只有片段才拿第一个兜底，并明确告诉上层「这只是片段」
+        partialHit?.let {
+            Log.w("CM/Resolve", "「${track.title}」所有源都只有试听片段")
+            return@withContext OnlineResolution(it, partialOnly = true)
         }
 
         val reason = when {
@@ -183,6 +213,20 @@ class PlaylistImportService(
         }
         Log.w("CM/Resolve", "「${track.title}」所有源都没拿到直链：$reason")
         OnlineResolution(reason = reason)
+    }
+
+    /**
+     * 这条直链是不是只有试听片段。
+     *
+     * 各源 resolve 后会带真实时长：网易云/酷我用 HEAD 长度标 partial，
+     * 下歌吧按歌单目标时长比；这里再用 tooShort 兜一层，
+     * 免得某个源没标就把 27 秒的片段当完整版返回。
+     */
+    private fun isPartialHit(c: AudioCandidate, track: PlaylistTrack): Boolean {
+        if (c.partial) return true
+        if (TrackMatcher.tooShort(c.durationSec, track.durationSec)) return true
+        // 歌单没带时长时 tooShort 判不了，用绝对时长兜底
+        return track.durationSec <= 0 && c.durationSec in 1..ABSOLUTE_PARTIAL_MAX_SEC
     }
 
     /** 探测一个候选的直链，顺手把每一步的失败原因落日志。 */

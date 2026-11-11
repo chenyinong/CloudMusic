@@ -59,7 +59,7 @@ class LiumingyeAudioSource(
             lastNote = "没登录夸克网盘，这个源没参与"
             return@withContext emptyList()
         }
-        val merged = collect(SearchKeywords.forTrack(title, artist))
+        val merged = collect(SearchKeywords.forTrack(title, artist), durationSec)
         merged.sortedByDescending { rank(it, title, artist, durationSec) }
     }
 
@@ -89,7 +89,11 @@ class LiumingyeAudioSource(
      * 会把整个源抛出去，连后面「纯歌名」那次兜底都跑不到 ——
      * 夸克网盘里明明有的歌就这么被判成「没找到可用音源」。
      */
-    private suspend fun collect(keywords: List<String>): List<AudioCandidate> {
+    private suspend fun collect(
+        keywords: List<String>,
+        /** 歌单里这首的目标时长；搜歌页按关键词搜时没有，传 0 */
+        targetDurationSec: Int = 0,
+    ): List<AudioCandidate> {
         val merged = LinkedHashMap<String, AudioCandidate>()
         var failed = 0
         for (kw in keywords) {
@@ -112,6 +116,8 @@ class LiumingyeAudioSource(
                     album = h.album,
                     // 搜索结果不带时长，resolve 之后能从夸克那边拿到真实的
                     durationSec = 0,
+                    // 目标时长单独记着，resolve 拿到真实时长才能判是不是片段
+                    targetDurationSec = targetDurationSec,
                     variantTag = TrackMatcher.variantTag(h.title, h.artist),
                     // 音质描述里能看出是什么格式，先记个大概，resolve 之后才是准的
                     ext = extFromQuality(h.quality),
@@ -212,12 +218,19 @@ class LiumingyeAudioSource(
                         why = "直链读不到音频（HTTP ${probe.httpCode}）"
                         continue
                     }
-                    lastNote = "拿到完整版 $durationSec 秒（$fileName）"
+                    // 以前写死 partial=false，27 秒的 aac 也打「拿到完整版」，
+                    // 歌单在线播放就把它当完整版播了。现在按真实时长判。
+                    val partial = isPartial(durationSec, candidate.targetDurationSec)
+                    lastNote = if (partial) {
+                        "只有试听片段 $durationSec 秒（目标 ${candidate.targetDurationSec} 秒，$fileName）"
+                    } else {
+                        "拿到完整版 $durationSec 秒（$fileName）"
+                    }
                     return@withContext candidate.copy(
                         audioUrl = url,
                         // 用夸克那边的真实时长，判定「是不是完整版」要用
                         durationSec = durationSec,
-                        partial = false,
+                        partial = partial,
                         // 真实扩展名：FLAC 就存成 .flac，别一律 .mp3
                         ext = extOf(fileName),
                         extraHeaders = mapOf(
@@ -232,6 +245,18 @@ class LiumingyeAudioSource(
             lastNote = why
             null
         }
+
+    /**
+     * 夸克文件的真实时长够不够完整。
+     *
+     * 歌单在线播放带目标时长 → 用 tooShort（比目标短 40% 以上就是片段）；
+     * 搜歌页按关键词搜没有目标时长 → 45 秒以内按试听片段算。
+     */
+    private fun isPartial(realSec: Int, targetSec: Int): Boolean {
+        if (realSec <= 0) return false
+        return if (targetSec > 0) TrackMatcher.tooShort(realSec, targetSec)
+        else realSec <= ABSOLUTE_PARTIAL_MAX_SEC
+    }
 
     private fun isAudioName(name: String): Boolean =
         name.endsWith(".mp3", true) || name.endsWith(".flac", true) ||
@@ -275,6 +300,9 @@ class LiumingyeAudioSource(
     }
 
     companion object {
+        /** 没有目标时长时的兜底：45 秒以内基本都是平台试听片段 */
+        private const val ABSOLUTE_PARTIAL_MAX_SEC = 45
+
         private val KNOWN_EXT = setOf(
             "mp3", "flac", "wav", "m4a", "m4b", "aac", "ogg", "oga", "opus", "wma", "ape", "alac",
         )
