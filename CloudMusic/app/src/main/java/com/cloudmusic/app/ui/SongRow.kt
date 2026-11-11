@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.HorizontalDivider
@@ -140,16 +139,12 @@ fun SongRow(
                         }
                         if (badge != null) {
                             Spacer(Modifier.width(6.dp))
+                            // 纯文字淡灰，和副标题同字号同色，不再用胶囊底
                             Text(
                                 badge,
-                                // 和旁边歌手副标题同字号同字重，只靠灰底胶囊区分，不然不协调
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.Normal,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                                    .padding(horizontal = 5.dp, vertical = 1.dp)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
