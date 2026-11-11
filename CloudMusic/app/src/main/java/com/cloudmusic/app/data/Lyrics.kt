@@ -54,6 +54,25 @@ object LrcParser {
 
     private val META = Regex("""^\[([a-zA-Z#]+):(.*)]$""")
 
+    /**
+     * QQ 音乐等在线源常把制作信息当正文塞进 LRC：
+     * 「词Lyrics by：」「曲Composed by：」「编曲Arranged by：」「监制Produced by：」…
+     * 这些不是歌词，显示出来既占行又容易让人以为匹配错了歌。
+     */
+    private val CREDIT_CN = Regex(
+        """^(?:词|曲|作词|作曲|编曲|监制|制作人|混音|母带|吉他|和声|录音|出品|发行|演唱|原唱|企划|统筹|文案|封面|词曲|OP|SP)[\sA-Za-z]*[:：]"""
+    )
+    private val CREDIT_EN = Regex(
+        """^(?:Lyrics|Composed|Arranged|Produced|Mixed|Mastered|Music|Words|Guitar|Bass|Drums|Vocal|OP|SP)(?:\s*by)?\s*[:：]""",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** 首行常见的「歌名 - 歌手」标题行，也不是歌词。 */
+    private val TITLE_LINE = Regex(""".+\s+-\s+.+""")
+
+    private fun isCreditLine(text: String): Boolean =
+        CREDIT_CN.containsMatchIn(text) || CREDIT_EN.containsMatchIn(text)
+
     fun parse(raw: String): Lyrics {
         if (raw.isBlank()) return Lyrics()
 
@@ -80,12 +99,18 @@ object LrcParser {
             val matched = LEADING_TIMES.find(line) ?: continue
             val text = matched.groupValues[2].trim()
             if (text.isEmpty()) continue
+            if (isCreditLine(text)) continue
 
             for (t in ONE_TIME.findAll(matched.groupValues[1])) {
                 val min = t.groupValues[1].toLongOrNull() ?: continue
                 val sec = t.groupValues[2].toLongOrNull() ?: continue
                 val millis = fractionToMillis(t.groupValues[3])
-                lines.add(LyricLine(min * 60_000L + sec * 1_000L + millis, text))
+                val timeMs = min * 60_000L + sec * 1_000L + millis
+                // 有 [ti:] 的 LRC，开头 1 秒内的「歌名 - 歌手」是标题不是歌词
+                if (meta.containsKey("ti") && lines.isEmpty() &&
+                    timeMs <= 1_000L && TITLE_LINE.matches(text)
+                ) continue
+                lines.add(LyricLine(timeMs, text))
             }
         }
 

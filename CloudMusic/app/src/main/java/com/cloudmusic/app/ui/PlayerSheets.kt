@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -40,9 +41,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -183,7 +188,10 @@ fun LyricsPage(
 ) {
     val state = vm.lyricsState
     val lyrics = state.lyrics
-    val index = remember(lyrics, position) { lyrics?.indexAt(position) ?: -1 }
+    val offsetMs = vm.lyricsOffsetMs
+    val index = remember(lyrics, position, offsetMs) {
+        lyrics?.indexAt(position + offsetMs) ?: -1
+    }
     val listState = rememberLazyListState()
 
     LaunchedEffect(index, lyrics) {
@@ -223,14 +231,39 @@ fun LyricsPage(
                 }
             }
 
-            else -> LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+            else -> LazyColumn(
+                state = listState,
+                // 首尾留出空白：第一行/最后一行也能滚到中间，而不是贴着边缘被切断
+                contentPadding = PaddingValues(vertical = 96.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    // 上下渐隐：靠近边缘的歌词按 alpha 淡出，不再硬裁成半行字。
+                    // 用 DstIn 只改透明度，后面那层氛围渐变背景能原样透出来。
+                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                    .drawWithContent {
+                        drawContent()
+                        drawRect(
+                            brush = Brush.verticalGradient(
+                                0f to Color.Transparent,
+                                0.12f to Color.Black,
+                                0.88f to Color.Black,
+                                1f to Color.Transparent
+                            ),
+                            blendMode = BlendMode.DstIn
+                        )
+                    }
+            ) {
                 itemsIndexed(lyrics.lines) { i, line ->
                     val active = i == index
                     Text(
                         text = line.text,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onSeek(line.timeMs) }
+                            .clickable {
+                                onSeek(
+                                    (line.timeMs - (lyrics.offsetMs + offsetMs)).coerceAtLeast(0L)
+                                )
+                            }
                             .padding(vertical = 8.dp),
                         fontSize = if (active) 19.sp else 15.sp,
                         fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,

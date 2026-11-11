@@ -100,6 +100,7 @@ fun PlayerScreen(
     val scope = rememberCoroutineScope()
 
     var showLyricsSearch by remember { mutableStateOf(false) }
+    var showLyricsOffset by remember { mutableStateOf(false) }
     var showDlna by remember { mutableStateOf(false) }
     var showQueue by remember { mutableStateOf(false) }
     var showInfo by remember { mutableStateOf(false) }
@@ -150,6 +151,27 @@ fun PlayerScreen(
         ) {
             moreFrom = 0
             showSleep = true
+        }
+        AppMenuItem(
+            text = "重新匹配歌词",
+            icon = Icons.Outlined.Refresh
+        ) {
+            moreFrom = 0
+            vm.refreshLyrics()
+        }
+        AppMenuItem(
+            text = "手动搜索歌词",
+            icon = Icons.Outlined.Search
+        ) {
+            moreFrom = 0
+            showLyricsSearch = true
+        }
+        AppMenuItem(
+            text = "歌词时间校准",
+            icon = Icons.Outlined.Schedule
+        ) {
+            moreFrom = 0
+            showLyricsOffset = true
         }
     }
 
@@ -579,11 +601,27 @@ fun PlayerScreen(
         LyricsSearchDialog(
             initialTitle = title,
             initialArtist = artist,
-            onDismiss = { showLyricsSearch = false },
-            onConfirm = { t, a ->
+            state = vm.lyricsSearchState,
+            onSearch = { t, a -> vm.searchLyricsCandidates(t, a) },
+            onSelect = { vm.selectLyricsCandidate(it) },
+            onAutoMatch = { t, a ->
                 showLyricsSearch = false
+                vm.clearLyricsSearch()
                 vm.manualSearchLyrics(t, a)
+            },
+            onDismiss = {
+                showLyricsSearch = false
+                vm.clearLyricsSearch()
             }
+        )
+    }
+
+    if (showLyricsOffset) {
+        LyricsOffsetDialog(
+            offsetMs = vm.lyricsOffsetMs,
+            onAdjust = { vm.adjustLyricsOffset(it) },
+            onReset = { vm.resetLyricsOffset() },
+            onDismiss = { showLyricsOffset = false }
         )
     }
 

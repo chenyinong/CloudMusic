@@ -17,6 +17,7 @@ import com.cloudmusic.app.data.DavProvider
 import com.cloudmusic.app.data.DavQuota
 import com.cloudmusic.app.data.DeleteResult
 import com.cloudmusic.app.data.Lyrics
+import com.cloudmusic.app.data.LyricsCandidate
 import com.cloudmusic.app.data.ProviderKind
 import com.cloudmusic.app.data.Track
 import com.cloudmusic.app.data.WebDavException
@@ -48,6 +49,16 @@ data class LyricsUiState(
     val lyrics: Lyrics? = null,
     val source: String = "",
     val error: String? = null,
+)
+
+/** 手动搜索歌词弹窗的状态：先列候选，用户点一首再取词。 */
+data class LyricsSearchUiState(
+    val searching: Boolean = false,
+    val applying: Boolean = false,
+    val candidates: List<LyricsCandidate> = emptyList(),
+    val error: String? = null,
+    /** 选中并加载成功，UI 收到后关闭弹窗 */
+    val done: Boolean = false,
 )
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -89,6 +100,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val error = _error.asStateFlow()
 
     var lyricsState by mutableStateOf(LyricsUiState())
+        private set
+
+    var lyricsSearchState by mutableStateOf(LyricsSearchUiState())
+        private set
+
+    private var lyricsSearchJob: Job? = null
+
+    /** 当前歌曲的歌词时间偏移：正数 = 歌词提前，负数 = 歌词延后。按曲目持久化。 */
+    var lyricsOffsetMs by mutableStateOf(0L)
         private set
 
     private var lyricsJob: Job? = null
@@ -974,8 +994,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             lyricsJob?.cancel()
             lyricsLoadingId = null
             lyricsState = LyricsUiState()
+            lyricsOffsetMs = 0L
             return
         }
+        // 换歌时把这首歌校准过的偏移取回来（单行查询，主线程读一次开销可忽略）
+        lyricsOffsetMs = appRef.db.lyricOffset(id)
         // 已经拿到过歌词，直接用
         lyricsCache[id]?.let {
             lyricsJob?.cancel()
@@ -991,11 +1014,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
+        startLyricsLoad(track, forceRefresh = false)
+    }
+
+    /** 清掉当前歌曲的旧歌词（内存 + 数据库）重新匹配，用在「歌词不对」时。 */
+    fun refreshLyrics() {
+        val track = player.currentTrack ?: return
+        lyricsCache.remove(track.key)
+        prefetchingIds.remove(track.key)
+        startLyricsLoad(track, forceRefresh = true)
+    }
+
+    private fun startLyricsLoad(track: Track, forceRefresh: Boolean) {
+        val id = track.key
         lyricsJob?.cancel()
         lyricsLoadingId = id
         lyricsState = LyricsUiState(loading = true)
         lyricsJob = viewModelScope.launch {
-            val result = appRef.lyricsRepository.load(track)
+            val result = appRef.lyricsRepository.load(track, forceRefresh)
             val state = LyricsUiState(
                 loading = false,
                 lyrics = result.lyrics,
@@ -1010,6 +1046,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             lyricsState = state
         }
     }
+
+    /** 校准当前歌曲的歌词时间，deltaMs 为正表示歌词往前挪（提前）。 */
+    fun adjustLyricsOffset(deltaMs: Long) {
+        val id = player.currentTrack?.key ?: return
+        val next = (lyricsOffsetMs + deltaMs).coerceIn(-60_000L, 60_000L)
+        lyricsOffsetMs = next
+        viewModelScope.launch(Dispatchers.IO) {
+            appRef.db.saveLyricOffset(id, next)
+        }
+    }
+
+    fun resetLyricsOffset() = adjustLyricsOffset(-lyricsOffsetMs)
 
     /** 提前把下一首的歌词准备好，按下一首时就不用等。 */
     fun prefetchLyrics(track: Track?) {
@@ -1039,7 +1087,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         lyricsLoadingId = null
         lyricsState = LyricsUiState(loading = true)
         lyricsJob = viewModelScope.launch {
-            val result = appRef.lyricsRepository.manualSearch(title, artist)
+            val result = appRef.lyricsRepository.manualSearch(title, artist, player.currentTrack)
             val state = LyricsUiState(
                 loading = false,
                 lyrics = result.lyrics,
@@ -1052,6 +1100,48 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             lyricsState = state
         }
+    }
+
+    /** 列出候选歌曲，不自动采用 —— 用户点哪首就用哪首的歌词。 */
+    fun searchLyricsCandidates(title: String, artist: String) {
+        lyricsSearchJob?.cancel()
+        lyricsSearchState = LyricsSearchUiState(searching = true)
+        lyricsSearchJob = viewModelScope.launch {
+            val list = appRef.lyricsRepository.searchCandidates(title, artist)
+            lyricsSearchState = LyricsSearchUiState(
+                candidates = list,
+                error = if (list.isEmpty()) "没搜到候选歌曲，换个歌名或歌手试试" else null,
+            )
+        }
+    }
+
+    /** 用户点中某一首：取它的歌词并覆盖当前曲目的缓存。失败则留在列表里让用户换一首。 */
+    fun selectLyricsCandidate(candidate: LyricsCandidate) {
+        lyricsSearchJob?.cancel()
+        lyricsSearchState = lyricsSearchState.copy(applying = true, error = null)
+        lyricsSearchJob = viewModelScope.launch {
+            val result = appRef.lyricsRepository.fetchCandidate(candidate, player.currentTrack)
+            if (result.error == null && !result.lyrics.isEmpty) {
+                val state = LyricsUiState(lyrics = result.lyrics, source = result.source)
+                player.currentTrack?.key?.let { lyricsCache[it] = state }
+                // 别让正在跑的自动加载晚一步把结果覆盖回去
+                lyricsJob?.cancel()
+                lyricsLoadingId = null
+                lyricsState = state
+                lyricsSearchState = LyricsSearchUiState(done = true)
+            } else {
+                lyricsSearchState = lyricsSearchState.copy(
+                    applying = false,
+                    error = result.error ?: "这首歌没有可用歌词",
+                )
+            }
+        }
+    }
+
+    /** 关闭搜索弹窗时清状态，下次打开是干净的输入框。 */
+    fun clearLyricsSearch() {
+        lyricsSearchJob?.cancel()
+        lyricsSearchState = LyricsSearchUiState()
     }
 
     var onlineLyrics: Boolean

@@ -32,13 +32,16 @@ class LibraryDb(context: Context) :
         /** 网盘里的封面图片文件索引（key = 目录 + 文件名） */
         const val TABLE_COVER_FILES = "cover_files"
 
+        /** 每首歌手动校准过的歌词时间偏移（毫秒） */
+        const val TABLE_LYRIC_OFFSETS = "lyric_offsets"
+
         /** 存下来的歌单（只存清单，歌曲在网盘里） */
         const val TABLE_PLAYLISTS = "playlists"
 
         /** 歌单里的每一首歌 */
         const val TABLE_PLAYLIST_TRACKS = "playlist_tracks"
 
-        const val VERSION = 8
+        const val VERSION = 9
 
         fun lyricKey(providerId: String, folder: String, base: String): String =
             "$providerId|${folder.lowercase()}|${base.lowercase()}"
@@ -67,6 +70,7 @@ class LibraryDb(context: Context) :
         createPlaylistTables(db)
         createCoverTable(db)
         createCoverFilesTable(db)
+        createLyricOffsetTable(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -115,6 +119,7 @@ class LibraryDb(context: Context) :
         if (oldVersion < 6) createPlaylistTables(db)
         if (oldVersion < 7) createCoverTable(db)
         if (oldVersion < 8) createCoverFilesTable(db)
+        if (oldVersion < 9) createLyricOffsetTable(db)
     }
 
     /**
@@ -398,6 +403,42 @@ class LibraryDb(context: Context) :
         }
         writableDatabase.insertWithOnConflict(
             TABLE_LYRICS, null, cv, SQLiteDatabase.CONFLICT_REPLACE
+        )
+    }
+
+    /** 丢掉某首歌缓存的歌词，让下次 load() 重新匹配（元数据纠正 / 手动重搜时用）。 */
+    fun clearLyrics(trackId: String) {
+        writableDatabase.delete(TABLE_LYRICS, "trackId = ?", arrayOf(trackId))
+    }
+
+    private fun createLyricOffsetTable(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS $TABLE_LYRIC_OFFSETS (
+                trackId TEXT PRIMARY KEY,
+                offsetMs INTEGER NOT NULL DEFAULT 0
+            )
+            """.trimIndent()
+        )
+    }
+
+    /** 正数 = 歌词提前，负数 = 歌词延后。现场版和录音室版时间轴差几秒时手动校准。 */
+    fun lyricOffset(trackId: String): Long {
+        readableDatabase.rawQuery(
+            "SELECT offsetMs FROM $TABLE_LYRIC_OFFSETS WHERE trackId = ?",
+            arrayOf(trackId)
+        ).use { c ->
+            return if (c.moveToFirst()) c.getLong(0) else 0L
+        }
+    }
+
+    fun saveLyricOffset(trackId: String, offsetMs: Long) {
+        val cv = ContentValues().apply {
+            put("trackId", trackId)
+            put("offsetMs", offsetMs)
+        }
+        writableDatabase.insertWithOnConflict(
+            TABLE_LYRIC_OFFSETS, null, cv, SQLiteDatabase.CONFLICT_REPLACE
         )
     }
 
