@@ -116,6 +116,9 @@ fun MiniPlayerBar(
     // 队列里只有一首歌的时候，切歌按钮就没意义
     val canSwitch = player.queue.size > 1
 
+    // 点击进歌词页但不带涟漪：毛玻璃上按下会留一块灰蒙蒙的高亮，看着像阴影
+    val noIndication = remember { MutableInteractionSource() }
+
     // 封面旋转：网易云那个小唱片一直在转，暂停才停
     var angle by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(playing) {
@@ -219,7 +222,11 @@ fun MiniPlayerBar(
                         // 封面也能点 —— 跟歌名区域一样进歌词页
                         modifier = Modifier
                             .rotate(angle)
-                            .clickable(onClick = onOpenPlayer)
+                            .clickable(
+                                interactionSource = noIndication,
+                                indication = null,
+                                onClick = onOpenPlayer
+                            )
                     )
                     Spacer(Modifier.width(10.dp))
                     Text(
@@ -230,7 +237,11 @@ fun MiniPlayerBar(
                         modifier = Modifier
                             .weight(1f)
                             .basicMarquee()
-                            .clickable(onClick = onOpenPlayer),
+                            .clickable(
+                                interactionSource = noIndication,
+                                indication = null,
+                                onClick = onOpenPlayer
+                            ),
                         maxLines = 1,
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Bold

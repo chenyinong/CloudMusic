@@ -1,6 +1,7 @@
 package com.cloudmusic.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -373,7 +374,7 @@ fun PlayerScreen(
             }
         }
 
-        // ── 歌名 + 心形：标题放宽到两行，别再一行硬截断成「xxx 2...」─────
+        // ── 歌名 + 心形：放不下就跑马灯滚，不再折成两行撑高标题区 ─────
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -383,9 +384,11 @@ fun PlayerScreen(
                 style = MaterialTheme.typography.titleLarge.copy(lineHeight = 28.sp),
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .basicMarquee()
             )
             Spacer(Modifier.width(14.dp))
             Icon(

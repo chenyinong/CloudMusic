@@ -142,7 +142,9 @@ fun SongRow(
                             Spacer(Modifier.width(6.dp))
                             Text(
                                 badge,
-                                style = MaterialTheme.typography.labelSmall,
+                                // 和旁边歌手副标题同字号同字重，只靠灰底胶囊区分，不然不协调
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Normal,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(4.dp))
