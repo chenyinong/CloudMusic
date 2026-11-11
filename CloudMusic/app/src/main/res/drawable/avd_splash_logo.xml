@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_splash_logo_large">
+    <target android:name="bar0" android:animation="@animator/bar_pulse_3" />
+    <target android:name="bar1" android:animation="@animator/bar_pulse_2" />
+    <target android:name="bar2" android:animation="@animator/bar_pulse_1" />
+    <target android:name="bar3" android:animation="@animator/bar_pulse_0" />
+    <target android:name="bar4" android:animation="@animator/bar_pulse_1" />
+    <target android:name="bar5" android:animation="@animator/bar_pulse_2" />
+    <target android:name="bar6" android:animation="@animator/bar_pulse_3" />
+</animated-vector>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="splash_title">云音乐</string>
+    <string name="splash_tagline">把网盘变成你的音乐库</string>
+    <string name="splash_footer">坚果云 · OneDrive · 夸克网盘\nv1.0.0</string>
+</resources>

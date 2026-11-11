@@ -78,6 +78,11 @@ import com.cloudmusic.app.data.formatBytes
  * 曲库、播放页那些按钮不该跟着变。
  */
 private val Accent = Color(0xFF1A1A1A)
+/**
+ * 空态声波插画专用：整页强调色后来统一改成近黑，但插画不该跟着变一坨灰黑，
+ * 这里留着原来的蓝紫（跟开屏页声波柱同一色系）。只影响空态插画。
+ */
+private val IllustrationBlue = Color(0xFF6C5CE7)
 private val BadgeGreen = Color(0xFF1E8E57)
 private val BadgeGreenBg = Color(0xFFE6F6EC)
 
@@ -689,7 +694,10 @@ private fun SoundWaveIllustration() {
             .clip(CircleShape)
             .background(
                 Brush.radialGradient(
-                    listOf(Accent.copy(alpha = 0.18f), Accent.copy(alpha = 0.03f))
+                    listOf(
+                        IllustrationBlue.copy(alpha = 0.18f),
+                        IllustrationBlue.copy(alpha = 0.03f)
+                    )
                 )
             ),
         contentAlignment = Alignment.Center
@@ -703,7 +711,7 @@ private fun SoundWaveIllustration() {
             heights.forEachIndexed { i, h ->
                 val barH = size.height * h
                 drawRoundRect(
-                    color = Accent.copy(alpha = 0.42f + 0.5f * h),
+                    color = IllustrationBlue.copy(alpha = 0.42f + 0.5f * h),
                     topLeft = Offset(
                         i * step + (step - barW) / 2f,
                         (size.height - barH) / 2f

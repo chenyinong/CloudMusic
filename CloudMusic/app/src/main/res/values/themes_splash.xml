@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      启动主题：Android 12+ 的系统启动页无法关闭，但可以不放图标、不留动画，
+      只留一瞬间的纯色底，首帧就交给自定义开屏页，视觉上等于直接显示开屏页。
+    -->
+    <style name="Theme.App.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon_empty</item>
+        <item name="windowSplashScreenAnimationDuration">0</item>
+        <item name="postSplashScreenTheme">@style/Theme.CloudMusic.Splash</item>
+        <item name="android:windowBackground">@drawable/splash_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <!--
+      自定义开屏页那一屏：系统栏透明，背景渐变由布局一直铺到状态栏/导航栏底下，
+      不再拿一块纯色去补 —— 状态栏颜色因此和页面完全一致。
+    -->
+    <style name="Theme.CloudMusic.Splash" parent="Theme.CloudMusic">
+        <item name="android:windowBackground">@drawable/splash_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

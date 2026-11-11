@@ -1,6 +1,8 @@
 package com.cloudmusic.app.player
 
+import android.app.PendingIntent
 import android.content.Intent
+import com.cloudmusic.app.MainActivity
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.database.StandaloneDatabaseProvider
@@ -78,8 +80,16 @@ class MusicService : MediaSessionService() {
         player = p
         p.addListener(playerListener)
 
+        // 通知栏 / 锁屏点进来直接回主界面，不用每次都过一遍开屏页
+        val sessionActivity = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
         mediaSession = MediaSession.Builder(this, p)
             .setCallback(sleepCallback)
+            .setSessionActivity(sessionActivity)
             .build()
 
         val provider = DefaultMediaNotificationProvider.Builder(this)

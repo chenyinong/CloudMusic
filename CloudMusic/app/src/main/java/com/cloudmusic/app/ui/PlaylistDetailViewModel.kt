@@ -190,25 +190,21 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
         get() = player.currentTrack?.key?.startsWith("online:") == true
 
     /**
-     * 给列表行取提示。
+     * 给列表行取提示：只有出错才给。
      *
-     * 「在线播放中」直接从当前曲目推导 —— 播到下一首，提示自己挪到下一行，
-     * 不用一个 key 状态去追着改。解析失败的原因留在它自己那一行
-     * （那是那首歌的属性，不是播放状态）。
+     * 播放中不再挂「在线播放中 …」那行字 —— 封面角标、歌名染色和右侧
+     * 暂停按钮已经能表明状态，多一行提示反而把列表撑高。
+     * 解析/播放失败的原因仍留在它自己那一行，并带「去别处找」的出口。
      */
     fun hintFor(key: String): OnlineHint? {
         onlineHint?.takeIf { it.error && it.key == key }?.let { return it }
         if (key != currentPlaylistKey || !currentIsOnline) return null
-        val err = playbackError
-        return if (err != null) {
-            OnlineHint(
-                key,
-                "在线播放失败：$err · 夸克 Cookie 可能已过期，去设置重新登录再试",
-                error = true
-            )
-        } else {
-            OnlineHint(key, "在线播放中 · 整张歌单连着播 · 点右侧图标暂停")
-        }
+        val err = playbackError ?: return null
+        return OnlineHint(
+            key,
+            "在线播放失败：$err · 夸克 Cookie 可能已过期，去设置重新登录再试",
+            error = true
+        )
     }
 
     /** 在线解析 / 起播的协程，快速切歌时把上一首的活取消掉。 */
