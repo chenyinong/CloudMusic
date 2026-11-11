@@ -202,6 +202,8 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
     private var resumeQueue: List<Track> = emptyList()
     private var resumeIndex = 0
     private var resumePosMs = 0L
+    /** 队列现在是不是被临时试听占着（连着试听几首时别反复重记现场）。 */
+    private var previewSession = false
     private var previewJob: Job? = null
 
     /** 自动搜索的计时任务（打字时反复重置） */
@@ -542,7 +544,8 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
      * 搜歌页「试听」：不下载、不写曲库，直接把网盘直链丢给播放器。
      *
      * 听对了再点导入，不用先占自己网盘的空间。夸克直链是会话绑定的，
-     * 播放层按 host 自动补 Cookie/Referer/PC UA（StreamDataSourceFactory）。
+     * 必须带上签发它时那份 Cookie，所以 extraHeaders 要跟着 Track 一路传到播放层
+     * （PlayerConnection → PlaybackHeaders → StreamDataSourceFactory）。
      */
     fun preview(hit: MusicHit) {
         // 再点一次 = 停止并恢复原来的播放
@@ -584,15 +587,23 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
                 mime = "audio/*",
                 durationSec = resolved.durationSec.toDouble(),
                 provider = "preview",
+                // 夸克直链会话绑定：Cookie/Referer 必须跟着这条直链走，
+                // 播放层按 URL 取出来带上（PlaybackHeaders）
+                extraHeaders = resolved.extraHeaders,
             )
-            val before = appRef.player.queue.toList()
-            resumeQueue = before
-            resumeIndex = before.indexOfFirst {
-                it.key == appRef.player.currentTrack?.key
-            }.coerceAtLeast(0)
-            resumePosMs = appRef.player.positionMs
+            // 连着试听第二首时，队列里已经是上一首试听了 ——
+            // 别把它当成「试听前的现场」记下来，否则退出时回放的还是试听。
+            if (!previewSession) {
+                val before = appRef.player.queue.toList()
+                resumeQueue = before
+                resumeIndex = before.indexOfFirst {
+                    it.key == appRef.player.currentTrack?.key
+                }.coerceAtLeast(0)
+                resumePosMs = appRef.player.positionMs
+            }
             // 只放这一首：临时队列，不进曲库、不留在歌单
             appRef.player.play(listOf(track), 0)
+            previewSession = true
             previewId = hit.id
             // 行内已经有歌名了，文案精简成来源 + 怎么停止
             previewHint = PreviewHint(
@@ -609,18 +620,30 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 停止试听，把试听前的队列和进度还回去。 */
+    /**
+     * 停止试听，把试听前的队列和进度还回去。
+     *
+     * @param restore false = 只清 UI 和协程、留着现场快照，给「换一首试听」用。
+     */
     fun stopPreview(restore: Boolean = true) {
         previewJob?.cancel()
         previewJob = null
         previewLoadingId = null
         previewId = null
         previewHint = null
-        if (restore && resumeQueue.isNotEmpty()) {
+        if (!restore) return
+
+        // 只有这首试听还在播的时候才回放旧队列：期间用户点了别的歌
+        // （比如「已导入」那行），就不能把那个播放抢回去。
+        if (resumeQueue.isNotEmpty() &&
+            appRef.player.currentTrack?.key?.startsWith("preview:") == true
+        ) {
             appRef.player.play(resumeQueue, resumeIndex, resumePosMs)
         }
         resumeQueue = emptyList()
+        resumeIndex = 0
         resumePosMs = 0L
+        previewSession = false
     }
 
     override fun onCleared() {

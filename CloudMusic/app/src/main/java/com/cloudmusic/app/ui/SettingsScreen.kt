@@ -189,7 +189,7 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
             }
 
             // ── 夸克网盘：下载链路的中转站 ────────────────────
-            // 进设置页自动校验一次登录态（5 分钟冷却），失效了当场亮红灯
+            // 进设置页每次都真实校验一次登录态，失效了当场亮红灯
             LaunchedEffect(vm.quarkLoggedIn) {
                 if (vm.quarkLoggedIn) vm.checkQuarkLogin()
             }
@@ -247,11 +247,20 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
                             style = MaterialTheme.typography.labelSmall,
                             color = Accent
                         )
-                        QuarkCheckState.INVALID -> Text(
-                            "✗ 实时验证：登录已失效，导歌会失败，请重新登录",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.error
-                        )
+                        QuarkCheckState.INVALID -> {
+                            Text(
+                                "✗ 实时验证：登录已失效，导歌会失败，请重新登录",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            if (vm.quarkCheckReason.isNotBlank()) {
+                                Text(
+                                    vm.quarkCheckReason,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                         QuarkCheckState.IDLE -> {}
                     }
                     if (vm.quarkCookieStale && !quarkInvalid) {
@@ -268,7 +277,7 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
                             vm.screen = Screen.QUARK_DIAG
                         }
                         SmallButton("重新验证", MaterialTheme.colorScheme.onSurfaceVariant) {
-                            vm.checkQuarkLogin(force = true)
+                            vm.checkQuarkLogin()
                         }
                         SmallButton("退出登录", MaterialTheme.colorScheme.error) {
                             vm.clearQuark()

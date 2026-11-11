@@ -233,6 +233,8 @@ fun LibraryScreen(
 
             // 挂了多个网盘时可以按网盘筛（轻量小胶囊，不要 FilterChip 那种粗边框）
             if (providers.size > 1) {
+                // 和上面「播放全部」拉开一点，两行控件别挤成一坨
+                Spacer(Modifier.height(8.dp))
                 Row(
                     Modifier
                         .fillMaxWidth()

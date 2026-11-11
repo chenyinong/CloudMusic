@@ -31,6 +31,14 @@ data class QuarkFile(
     val md5: String,
     /** 带 auth_key 的直链，有时效 */
     val downloadUrl: String,
+    /**
+     * 这条直链配套的完整 Cookie。
+     *
+     * 夸克在签发直链的 `file/download` 响应里会 `Set-Cookie: __puus=<新值>`，
+     * CDN 只认这个新值；用登录时存的旧 __puus 去 GET 直链会被 Tengine 412 拦掉。
+     * 所以直链和它的 cookie 必须成对传下去（并发导入时各用各的，不能共用全局）。
+     */
+    val cookie: String = "",
 )
 
 /** 转存任务结果里的文件信息。 */

@@ -20,6 +20,22 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.cloudmusic.app.data.Track
 import com.cloudmusic.app.player.MusicService
+import com.cloudmusic.app.player.PlaybackHeaders
+
+/**
+ * 播放模式：把 ExoPlayer 的 repeatMode + shuffle 合成一个概念，
+ * 界面上每种模式一个专属图标，不用再靠「图标颜色深浅」猜状态。
+ */
+enum class PlayMode {
+    /** 列表循环 */
+    LIST_LOOP,
+    /** 随机播放 */
+    SHUFFLE,
+    /** 顺序播放：按列表放完就停 */
+    SEQUENTIAL,
+    /** 单曲循环 */
+    SINGLE_LOOP,
+}
 
 /**
  * 与后台播放服务 (MusicService) 的连接封装。
@@ -68,6 +84,10 @@ class PlayerConnection(private val context: Context) {
 
     /** 随机播放开关。 */
     var shuffle by mutableStateOf(false)
+        private set
+
+    /** 当前播放模式（UI 直接读这个，不再自己拼 repeatMode + shuffle）。 */
+    var playMode by mutableStateOf(PlayMode.LIST_LOOP)
         private set
 
     /** 定时关闭状态：0=关 1=倒计时 2=播完当前曲。 */
@@ -247,8 +267,12 @@ class PlayerConnection(private val context: Context) {
         Log.d("CM/PlayerQueue", "插入第 ${index + 1} 首「${track.title}」→ 媒体位置 $insertAt")
     }
 
-    private fun toMediaItem(t: Track): MediaItem =
-        MediaItem.Builder()
+    private fun toMediaItem(t: Track): MediaItem {
+        // MediaItem 带不了自定义请求头（tag 也不随 MediaSession 传），
+        // 但夸克直链必须用它自己那份 Cookie（会话绑定），所以按 URL 存一份给
+        // 播放层取（见 PlaybackHeaders / StreamDataSourceFactory）。
+        PlaybackHeaders.put(t.url, t.extraHeaders)
+        return MediaItem.Builder()
             .setUri(t.url)
             .setMediaId(t.key)
             .setMediaMetadata(
@@ -259,6 +283,7 @@ class PlayerConnection(private val context: Context) {
                     .build()
             )
             .build()
+    }
 
     /**
      * 往播放队列末尾追加一首，不打断当前播放。
@@ -303,6 +328,31 @@ class PlayerConnection(private val context: Context) {
         controller?.seekTo(position)
     }
 
+    /** 直接选定一种播放模式（控制栏菜单用）。 */
+    fun applyPlayMode(mode: PlayMode) {
+        val c = controller ?: return
+        c.shuffleModeEnabled = mode == PlayMode.SHUFFLE
+        c.repeatMode = when (mode) {
+            PlayMode.LIST_LOOP, PlayMode.SHUFFLE -> Player.REPEAT_MODE_ALL
+            PlayMode.SEQUENTIAL -> Player.REPEAT_MODE_OFF
+            PlayMode.SINGLE_LOOP -> Player.REPEAT_MODE_ONE
+        }
+        shuffle = c.shuffleModeEnabled
+        repeatMode = c.repeatMode
+        playMode = mode
+    }
+
+    /** 从播放器实际状态回推模式，保证外部改了 repeat/shuffle 也不会显示错。 */
+    private fun syncPlayMode() {
+        val c = controller ?: return
+        playMode = when {
+            c.shuffleModeEnabled -> PlayMode.SHUFFLE
+            c.repeatMode == Player.REPEAT_MODE_ONE -> PlayMode.SINGLE_LOOP
+            c.repeatMode == Player.REPEAT_MODE_OFF -> PlayMode.SEQUENTIAL
+            else -> PlayMode.LIST_LOOP
+        }
+    }
+
     /** 切循环模式：列表循环 → 单曲循环 → 不循环 → 列表循环。 */
     fun cycleRepeatMode() {
         val c = controller ?: return
@@ -313,6 +363,7 @@ class PlayerConnection(private val context: Context) {
         }
         c.repeatMode = next
         repeatMode = next
+        syncPlayMode()
     }
 
     /** 切随机播放。 */
@@ -321,6 +372,7 @@ class PlayerConnection(private val context: Context) {
         val next = !c.shuffleModeEnabled
         c.shuffleModeEnabled = next
         shuffle = next
+        syncPlayMode()
     }
 
     /** 定时关闭：N 分钟后暂停。 */

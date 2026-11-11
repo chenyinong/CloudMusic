@@ -47,7 +47,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -102,10 +101,9 @@ fun ImportScreen(
     // 曲库那边删了文件，这里的记录也得跟着变，不然点「播放」会播一个已经不存在的东西。
     LaunchedEffect(Unit) { vm.reloadImported() }
 
-    // 离开搜歌页就收掉试听，别把临时单曲队列带到别的页面
-    DisposableEffect(Unit) {
-        onDispose { vm.stopPreview() }
-    }
+    // 「离开搜歌页收掉试听」改由 Root 按目标页判断：
+    // 点迷你条进播放页只是看歌词，不能把正在试听的这首换掉。
+    // 挂在这里会在 ImportScreen 一销毁时就回放旧队列（见 Root）。
 
     Column(
         Modifier

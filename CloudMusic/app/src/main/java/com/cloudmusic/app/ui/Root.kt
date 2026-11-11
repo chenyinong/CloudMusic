@@ -57,6 +57,17 @@ fun CloudMusicRoot(vm: AppViewModel) {
     }
 
     val conn = vm.player
+
+    // 试听的收尾统一放在这里按「目标页」判断，而不是挂在搜歌页的
+    // DisposableEffect 上：点迷你条只是打开播放页看歌词，歌还得是这首。
+    // 以前搜歌页一销毁就 stopPreview()，旧队列立刻回放，进播放页就换了首歌。
+    val importVm: ImportViewModel = viewModel()
+    LaunchedEffect(vm.screen) {
+        if (vm.screen != Screen.IMPORT && vm.screen != Screen.PLAYER) {
+            importVm.stopPreview()
+        }
+    }
+
     var showMiniQueue by remember { mutableStateOf(false) }
     /**
      * 打开播放页时要不要直接停在歌词页。

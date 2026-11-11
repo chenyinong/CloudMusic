@@ -61,6 +61,29 @@ class QuarkClient(
     /** 已登录 */
     val loggedIn: Boolean get() = cookie.contains("__pus")
 
+    /**
+     * 把 `file/download` 响应里刷新的 __puus 合进登录 cookie。
+     *
+     * 夸克签发直链时会顺手换新 __puus，CDN 只认新值 —— 拿登录时存的旧值去 GET
+     * 直链，Tengine 直接回 412 Precondition Failed（返回体带正确文件名，很迷惑）。
+     * 每条直链各带各的 cookie，并发导入时不会串号。
+     */
+    private fun cookieWithSetCookie(headers: okhttp3.Headers): String {
+        val fresh = headers.values("Set-Cookie")
+            .map { it.substringBefore(';').trim() }
+            .firstOrNull { it.startsWith("__puus=") }
+            ?: return cookie
+        val parts = LinkedHashMap<String, String>()
+        for (pair in cookie.split(';')) {
+            val t = pair.trim()
+            val i = t.indexOf('=')
+            if (i > 0) parts[t.substring(0, i)] = t.substring(i + 1)
+        }
+        val i = fresh.indexOf('=')
+        if (i > 0) parts[fresh.substring(0, i)] = fresh.substring(i + 1)
+        return parts.entries.joinToString("; ") { "${it.key}=${it.value}" }
+    }
+
     // ------------------------------------------------------------ 分享解析
 
     /** 第一步：拿 stoken。 */
@@ -122,7 +145,13 @@ class QuarkClient(
                 .put("pwd_id", pwdId)
                 .put("stoken", stoken)
                 .toString()
-            val json = postJson("$HOST/1/clouddrive/file/download?pr=ucpro&fr=pc", body)
+            // 夸克会在这个响应里刷新 __puus，CDN 直链只认刷新后的值；
+            // 之前 postJson 把响应头丢了，直链带着旧 __puus 去 GET 一律被 Tengine 412。
+            var linkCookie = cookie
+            val json = postJson(
+                "$HOST/1/clouddrive/file/download?pr=ucpro&fr=pc", body,
+                onHeaders = { linkCookie = cookieWithSetCookie(it) }
+            )
             val arr = json.optJSONArray("data")
             if (arr == null || arr.length() == 0) {
                 throw QuarkException(quarkMessage(json, "这个文件拿不到下载地址"))
@@ -135,6 +164,7 @@ class QuarkClient(
                 durationSec = o.optInt("duration"),
                 md5 = o.optString("md5"),
                 downloadUrl = o.optString("download_url"),
+                cookie = linkCookie,
             )
         }
 
@@ -192,6 +222,8 @@ class QuarkClient(
         url: String,
         readBytes: Int = 64 * 1024,
         withCookie: Boolean = true,
+        /** 与直链配套的会话 cookie；不传就用登录时存的那份 */
+        sessionCookie: String? = null,
     ): QuarkProbe =
         withContext(Dispatchers.IO) {
             probeOnce(
@@ -201,6 +233,7 @@ class QuarkClient(
                 pcUa = true,
                 readBytes = readBytes,
                 withCookie = withCookie,
+                cookieOverride = sessionCookie,
             )
         }
 
@@ -227,15 +260,17 @@ class QuarkClient(
         pcUa: Boolean,
         readBytes: Int,
         withCookie: Boolean = true,
+        cookieOverride: String? = null,
     ): QuarkProbe {
         return try {
+            val effectiveCookie = cookieOverride?.takeIf { it.isNotBlank() } ?: cookie
             val request = Request.Builder()
                 .url(url)
                 .header("User-Agent", if (pcUa) UA_PC else UA_MOBILE)
                 .header("Referer", "https://pan.quark.cn/")
                 .apply { if (range != null) header("Range", range) }
-                // 直链是会话绑定的，必须带登录 Cookie，否则 CDN 直接 412
-                .apply { if (withCookie && cookie.isNotBlank()) header("Cookie", cookie) }
+                // 直链是会话绑定的：必须用签发直链那次响应刷新出来的 __puus，否则 CDN 412
+                .apply { if (withCookie && effectiveCookie.isNotBlank()) header("Cookie", effectiveCookie) }
                 .build()
             http.newCall(request).execute().use { resp ->
                 val body = resp.body
@@ -310,6 +345,8 @@ class QuarkClient(
         url: String,
         body: String,
         extraHeaders: Map<String, String> = emptyMap(),
+        /** 需要读响应头（比如直链签发时刷新的 Set-Cookie）时挂这里 */
+        onHeaders: ((okhttp3.Headers) -> Unit)? = null,
     ): JSONObject {
         val request = Request.Builder()
             .url(url)
@@ -321,6 +358,7 @@ class QuarkClient(
             .post(body.toRequestBody())
             .build()
         http.newCall(request).execute().use { resp ->
+            onHeaders?.invoke(resp.headers)
             val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) {
                 throw QuarkException("HTTP ${resp.code}：${text.take(160)}")
@@ -473,10 +511,12 @@ class QuarkClient(
         onStep("转存完成：$fileName")
 
         // 3. 自己盘的文件拿直链
+        var linkCookie = cookie
         val dl = postJson("$HOST/1/clouddrive/file/download?pr=ucpro&fr=pc", JSONObject()
             .put("fids", org.json.JSONArray().put(newFid))
             .put("fid_list", org.json.JSONArray().put(newFid))
-            .toString())
+            .toString(),
+            onHeaders = { linkCookie = cookieWithSetCookie(it) })
         val arr = dl.optJSONArray("data")
         if (arr == null || arr.length() == 0) {
             throw QuarkException(quarkMessage(dl, "自己盘的文件也拿不到下载地址"))
@@ -490,6 +530,7 @@ class QuarkClient(
             durationSec = o.optInt("duration", duration),
             md5 = o.optString("md5"),
             downloadUrl = o.optString("download_url"),
+            cookie = linkCookie,
         )
     }
 
@@ -709,26 +750,35 @@ class QuarkClient(
     }
 
     /**
-     * 实时校验登录态：调会员接口，code==0 且有 data 即有效。
+     * 实时校验登录态：拿 cookie 去「列自己网盘根目录」。
      *
-     * 本地只判断「cookie 里有没有 __pus」是看不出失效的 ——
-     * 夸克风控、换设备登录都会让 cookie 提前作废，
-     * 只有真的拿它请求一次才知道还能不能用。
+     * 之前用会员信息接口（/member），但那个接口**游客态也返回 code=0**，
+     * cookie 早就过期了照样判成「已登录」。列自己盘的文件是导歌真正要用的
+     * 权限，必须登录才拿得到，用它才测得准。
      */
     suspend fun checkLogin(): QuarkSessionCheck = withContext(Dispatchers.IO) {
-        try {
-            val json = getJson("$HOST/1/clouddrive/member?pr=ucpro&fr=pc")
-            val data = json.optJSONObject("data")
-            val member = data?.optJSONObject("member") ?: data
-            val nick = member?.optString("nick").orEmpty()
-                .ifBlank { member?.optString("name").orEmpty() }
-            QuarkSessionCheck(
-                ok = json.optInt("code", -1) == 0 && data != null,
-                nickname = nick,
-            )
+        val url = "$HOST/1/clouddrive/file/sort?pr=ucpro&fr=pc" +
+            "&pdir_fid=0&_page=1&_size=1&_fetch_total=1"
+        val json = try {
+            getJson(url)
         } catch (e: Exception) {
-            QuarkSessionCheck(ok = false, nickname = "")
+            return@withContext QuarkSessionCheck(
+                ok = false,
+                nickname = "",
+                reason = e.message?.take(80).orEmpty().ifBlank { "网络请求失败" }
+            )
         }
+        val code = json.optInt("code", -1)
+        val data = json.optJSONObject("data")
+        if (code != 0 || data == null || !data.has("list")) {
+            return@withContext QuarkSessionCheck(
+                ok = false,
+                nickname = "",
+                reason = "接口返回 code=$code ${json.optString("message").take(40)}".trim()
+            )
+        }
+        // 昵称只用来展示，拿不到不影响「有效」这个结论
+        QuarkSessionCheck(ok = true, nickname = accountName(), reason = "")
     }
 
     private fun enc(s: String): String = URLEncoder.encode(s, "UTF-8")
@@ -742,4 +792,6 @@ data class QuarkSessionCheck(
     val ok: Boolean,
     /** 顺手带回的账号昵称，空串表示没拿到 */
     val nickname: String,
+    /** 校验不通过的原因，给设置页显示，方便判断是失效还是网络问题 */
+    val reason: String = "",
 )

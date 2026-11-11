@@ -455,7 +455,7 @@ class MusicSearchRepository(
      *
      * 优先夸克（完整版，几步网络请求），拿不到就退回现成直链或网易云
      * outer/url（多数只有 30 秒片段）。返回的 hit 里 directUrl / extraHeaders
-     * 已填好；播放层按 host 自动给夸克请求带 Cookie（见 StreamDataSourceFactory）。
+     * 已填好；播放层按 URL 取这份 extraHeaders 带上（见 PlaybackHeaders）。
      */
     suspend fun resolveForPreview(hit: MusicHit): MusicHit? =
         withContext(Dispatchers.IO) {
@@ -493,6 +493,10 @@ class MusicSearchRepository(
         onProgress: ((got: Long, total: Long) -> Unit)? = null,
     ): DownloadResult =
         withContext(Dispatchers.IO) {
+            // 412 兜底时转存出来的中转文件，下载一结束（成功或失败）就清掉。
+            // 用 try/finally 包住整段，中途任意 return 都会走到清理。
+            var cleanupUrl: String? = null
+            return@withContext try {
             // 夸克网盘来源：先把分享链接解析成带签名的直链。
             // 直链是会话绑定的，解析时顺带把登录 Cookie 带上，不然 CDN 会 412。
             //
@@ -550,6 +554,7 @@ class MusicSearchRepository(
             }
             // 直链拿到了，这一段（含分享详情/下载地址/探活/302 升级）到此为止
             resolveMs = elapsedMs(tResolve)
+            cleanupUrl = if (isCloud) url else null
 
             // ── 先试并发分段下载（只有夸克直链值得试）──────────────────
             //
@@ -701,6 +706,9 @@ class MusicSearchRepository(
                 note,
                 timings = ImportTimings(resolveMs, downloadMs, verifyMs, attempts = attemptUsed)
             )
+            } finally {
+                cleanupUrl?.let { quarkSource?.cleanup(it) }
+            }
         }
 
     /**

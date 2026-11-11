@@ -47,6 +47,7 @@ class Prefs(context: Context) {
         private const val KEY_QUARK_ACCOUNT = "quark_account"
         private const val KEY_QUARK_LOGIN_AT = "quark_login_at"
         private const val KEY_QUARK_CHECK_AT = "quark_check_at"
+        private const val KEY_QUARK_CHECK_OK = "quark_check_ok"
         private const val KEY_DAV_CAPACITY = "dav_capacity_bytes"
         private const val KEY_DAV_USED = "dav_used_bytes"
         private const val KEY_IMPORTED = "imported_tracks"
@@ -255,6 +256,11 @@ class Prefs(context: Context) {
         get() = sp.getLong(KEY_QUARK_CHECK_AT, 0L)
         set(v) = sp.edit().putLong(KEY_QUARK_CHECK_AT, v).apply()
 
+    /** 上次实时校验的结果，重启 App 后也要能显示「已失效」 */
+    var quarkCheckOk: Boolean
+        get() = sp.getBoolean(KEY_QUARK_CHECK_OK, false)
+        set(v) = sp.edit().putBoolean(KEY_QUARK_CHECK_OK, v).apply()
+
     val quarkLoggedIn: Boolean
         get() = quarkCookie.contains("__pus") && quarkCookie.isNotBlank()
 
@@ -278,6 +284,7 @@ class Prefs(context: Context) {
             .remove(KEY_QUARK_ACCOUNT)
             .remove(KEY_QUARK_LOGIN_AT)
             .remove(KEY_QUARK_CHECK_AT)
+            .remove(KEY_QUARK_CHECK_OK)
             .apply()
     }
 

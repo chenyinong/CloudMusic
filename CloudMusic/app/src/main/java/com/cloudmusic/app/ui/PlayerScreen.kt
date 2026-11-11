@@ -549,11 +549,11 @@ fun PlayerScreen(
             // 用户点播放期望的是电视出声
             PlayerControlBar(
                 playing = if (casting != null) dlnaVm.castPlaying else conn.playing,
-                repeatMode = conn.repeatMode,
+                playMode = conn.playMode,
                 onToggle = { if (casting != null) dlnaVm.toggleCast() else conn.toggle() },
                 onPrevious = { if (casting != null) dlnaVm.previousCast() else conn.previous() },
                 onNext = { if (casting != null) dlnaVm.nextCast() else conn.next() },
-                onCycleRepeat = { conn.cycleRepeatMode() },
+                onSelectMode = { conn.applyPlayMode(it) },
                 onShowQueue = { showQueue = true },
                 modifier = Modifier.fillMaxWidth()
             )

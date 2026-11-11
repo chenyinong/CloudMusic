@@ -26,22 +26,33 @@ class StreamDataSourceFactory(private val prefs: Prefs) : DataSource.Factory {
             .addInterceptor { chain ->
                 val request = chain.request()
                 val host = request.url.host
+                val builder = request.newBuilder()
 
-                // 夸克直链是会话绑定的：必须带登录 Cookie + Referer + PC UA，
-                // 否则 CDN 直接 412。曲库里的歌都来自自己的网盘，只有「搜歌页试听」
-                // 和「歌单在线播放」会请求夸克域名，所以按 host 判断就够。
+                // 这条直链自己的请求头优先 —— 必须在下面「按 host 补默认值」之前写，
+                // 否则会被旧 Cookie 盖掉。
+                //
+                // 夸克直链是会话绑定的：URL 里的 token 只认签发它时刷新出来的
+                // `__puus`，拿设置里那份旧 Cookie 去请求会被 CDN 412。
+                // 建队列时已经按 URL 存好了（见 PlaybackHeaders / PlayerConnection）。
+                val extra = PlaybackHeaders.of(request.url.toString())
+                for ((k, v) in extra) builder.header(k, v)
+                fun hasHeader(name: String) =
+                    extra.keys.any { it.equals(name, ignoreCase = true) }
+
+                // 夸克直链还要求 PC UA + Referer，缺了同样 412。
+                // 曲库里的歌都来自自己的网盘，只有「搜歌页试听」和「歌单在线播放」
+                // 会请求夸克域名，所以按 host 判断就够。
                 // OkHttp 跟随 302 时只自动剥离 Authorization，其它普通头会保留，
                 // 所以重定向到 CDN 之后这几个头依然在。
-                val quark = host.contains("quark.cn", ignoreCase = true) &&
-                    prefs.quarkCookie.isNotBlank()
-                val builder = request.newBuilder()
-                    .header(
-                        "User-Agent",
-                        if (quark) QuarkClient.UA_PC else "CloudMusic/1.0 (Android)"
-                    )
+                val quark = host.contains("quark.cn", ignoreCase = true)
                 if (quark) {
-                    builder.header("Cookie", prefs.quarkCookie.trim())
-                    builder.header("Referer", "https://pan.quark.cn/")
+                    if (!hasHeader("User-Agent")) builder.header("User-Agent", QuarkClient.UA_PC)
+                    if (!hasHeader("Cookie") && prefs.quarkCookie.isNotBlank()) {
+                        builder.header("Cookie", prefs.quarkCookie.trim())
+                    }
+                    if (!hasHeader("Referer")) builder.header("Referer", "https://pan.quark.cn/")
+                } else if (!hasHeader("User-Agent")) {
+                    builder.header("User-Agent", "CloudMusic/1.0 (Android)")
                 }
 
                 val authHeader = StreamAuth.header(prefs, host)

@@ -1,10 +1,19 @@
 package com.cloudmusic.app.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,6 +50,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -49,16 +59,21 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlin.math.abs
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeStyle
 import dev.chrisbanes.haze.HazeTint
 import dev.chrisbanes.haze.hazeChild
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * mini 条和 TAB 栏共用的毛玻璃参数：清透白玻璃（深色模式换深玻璃）。
@@ -119,6 +134,45 @@ fun MiniPlayerBar(
     // 点击进歌词页但不带涟漪：毛玻璃上按下会留一块灰蒙蒙的高亮，看着像阴影
     val noIndication = remember { MutableInteractionSource() }
 
+    // 左右滑切歌：跟翻页一致，左滑下一首、右滑上一首。
+    // 阈值放低一点，短促一划就能切；方向取手势中的最大位移，来回滑也不会相互抵消。
+    // 一次手势只切一次，点击和竖滑都不受影响。
+    val density = LocalDensity.current
+    val swipeThreshold = with(density) { 24.dp.toPx() }
+    // 滑动时内容跟手轻微位移，松手弹回，让「这一划真的切了歌」有反馈
+    val swipeOffset = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    val swipeModifier = Modifier.pointerInput(player, dlna, canSwitch, casting != null) {
+        var travelled = 0f
+        var peak = 0f
+        var switched = false
+        detectHorizontalDragGestures(
+            onDragStart = { travelled = 0f; peak = 0f; switched = false },
+            onHorizontalDrag = { _, dx ->
+                if (canSwitch || casting != null) {
+                    travelled += dx
+                    if (abs(travelled) > abs(peak)) peak = travelled
+                    // 阻尼 0.3 且封顶，别把整张卡片拖出屏幕
+                    scope.launch {
+                        swipeOffset.snapTo((travelled * 0.3f).coerceIn(-48f, 48f))
+                    }
+                    if (!switched && abs(peak) >= swipeThreshold) {
+                        switched = true
+                        if (peak < 0) {
+                            // 左滑：下一首
+                            if (casting != null) dlna.nextCast() else player.next()
+                        } else {
+                            // 右滑：上一首
+                            if (casting != null) dlna.previousCast() else player.previous()
+                        }
+                    }
+                }
+            },
+            onDragEnd = { scope.launch { swipeOffset.animateTo(0f) } },
+            onDragCancel = { scope.launch { swipeOffset.animateTo(0f) } }
+        )
+    }
+
     // 封面旋转：网易云那个小唱片一直在转，暂停才停
     var angle by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(playing) {
@@ -165,6 +219,7 @@ fun MiniPlayerBar(
             .fillMaxWidth()
             .padding(horizontal = 10.dp)
             .padding(bottom = 8.dp)
+            .then(swipeModifier)
             .then(
                 if (hazeState != null) {
                     Modifier.hazeChild(
@@ -211,7 +266,8 @@ fun MiniPlayerBar(
                     Modifier
                         .fillMaxWidth()
                         .height(54.dp)
-                        .padding(start = 14.dp, end = 10.dp),
+                        .padding(start = 14.dp, end = 10.dp)
+                        .graphicsLayer { translationX = swipeOffset.value },
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     CoverThumb(
@@ -229,23 +285,36 @@ fun MiniPlayerBar(
                             )
                     )
                     Spacer(Modifier.width(10.dp))
-                    Text(
-                        // 参考图是「歌名 - 歌手」单行粗体；放不下不省略号，
-                        // 改跑马灯来回滚，歌手名也能看全
-                        if (artist.isBlank()) title.ifBlank { "未知歌曲" }
-                        else "${title.ifBlank { "未知歌曲" }} - $artist",
-                        modifier = Modifier
-                            .weight(1f)
-                            .basicMarquee()
-                            .clickable(
-                                interactionSource = noIndication,
-                                indication = null,
-                                onClick = onOpenPlayer
-                            ),
-                        maxLines = 1,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Box(Modifier.weight(1f)) {
+                        // 切歌时旧歌名淡出上移、新歌名淡入上移，不要硬生生跳字
+                        AnimatedContent(
+                            targetState = title to artist,
+                            modifier = Modifier.fillMaxWidth(),
+                            transitionSpec = {
+                                (fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 2 }) togetherWith
+                                    (fadeOut(tween(150)) + slideOutVertically(tween(150)) { -it / 2 })
+                            },
+                            label = "miniTitle"
+                        ) { (t, a) ->
+                            Text(
+                                // 参考图是「歌名 - 歌手」单行粗体；放不下不省略号，
+                                // 改跑马灯来回滚，歌手名也能看全
+                                if (a.isBlank()) t.ifBlank { "未知歌曲" }
+                                else "${t.ifBlank { "未知歌曲" }} - $a",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .basicMarquee()
+                                    .clickable(
+                                        interactionSource = noIndication,
+                                        indication = null,
+                                        onClick = onOpenPlayer
+                                    ),
+                                maxLines = 1,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                     Spacer(Modifier.width(8.dp))
                     // 播放/暂停：白底圆形按钮（参考图样式）
                     Box(

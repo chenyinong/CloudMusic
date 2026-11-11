@@ -36,6 +36,20 @@ class LiumingyeAudioSource(
     /** 没登录夸克就下不了，这个源直接不参与。 */
     private val available: Boolean get() = cookieProvider().contains("__pus")
 
+    /**
+     * 412 兜底时转存到自己盘的临时文件：key 是交给上层的直链 URL。
+     * 下载一结束（成功或失败）由 [cleanup] 删掉，不占用户夸克空间。
+     */
+    private val pendingCleanup = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    suspend fun cleanup(url: String) {
+        val fid = pendingCleanup.remove(url) ?: return
+        // 下载被取消时也要把中转文件删掉，别留在用户夸克盘里
+        withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+            quark.deleteFile(fid)
+        }
+    }
+
     override suspend fun search(
         title: String,
         artist: String,
@@ -156,32 +170,60 @@ class LiumingyeAudioSource(
                 }
                 // 音质从高到低试：flac > wav > mp3
                 for (file in audioFiles.sortedByDescending { qualityRank(it.fileName) }) {
-                    val url = try {
-                        quark.downloadUrl(pwdId, token.stoken, file.fid).downloadUrl
+                    val qf = try {
+                        quark.downloadUrl(pwdId, token.stoken, file.fid)
                     } catch (e: Exception) {
                         why = "拿不到下载地址"
                         continue
                     }
+                    var url = qf.downloadUrl
+                    // 直链和它签发那次响应刷新的 __puus 是成对绑定的，别用旧 cookie
+                    var linkCookie = qf.cookie
                     if (url.isBlank()) {
                         why = "拿不到下载地址"
                         continue
                     }
-                    // 验一下这个直链真能下（直链是会话绑定的，必须带 Cookie）
-                    val probe = quark.probe(url, readBytes = 8 * 1024)
+                    var fileName = file.fileName
+                    var durationSec = file.durationSec
+                    // 验一下这个直链真能下（直链是会话绑定的，必须带配套 Cookie）
+                    var probe = quark.probe(url, readBytes = 8 * 1024, sessionCookie = linkCookie)
+                    if (!probe.looksLikeAudio && probe.httpCode == 412) {
+                        // 配套 cookie 都带上了还被拦，再退一步：转存到自己盘重新签直链，
+                        // 不受分享权限限制。正常情况走不到这里。
+                        Log.i("CM/Liumingye", "直链仍 HTTP 412，改走转存兜底：$fileName")
+                        val own = try {
+                            quark.saveAndResolve(pwdId, token.stoken, file.fid)
+                        } catch (e: Exception) {
+                            Log.i("CM/Liumingye", "转存兜底失败：${e.message}")
+                            null
+                        }
+                        if (own != null && own.downloadUrl.isNotBlank()) {
+                            url = own.downloadUrl
+                            linkCookie = own.cookie
+                            if (own.fileName.isNotBlank()) fileName = own.fileName
+                            if (own.durationSec > 0) durationSec = own.durationSec
+                            pendingCleanup[url] = own.fid
+                            probe = quark.probe(
+                                url, readBytes = 8 * 1024, sessionCookie = linkCookie
+                            )
+                        }
+                    }
                     if (!probe.looksLikeAudio) {
                         why = "直链读不到音频（HTTP ${probe.httpCode}）"
                         continue
                     }
-                    lastNote = "拿到完整版 ${file.durationSec} 秒（${file.fileName}）"
+                    lastNote = "拿到完整版 $durationSec 秒（$fileName）"
                     return@withContext candidate.copy(
                         audioUrl = url,
                         // 用夸克那边的真实时长，判定「是不是完整版」要用
-                        durationSec = file.durationSec,
+                        durationSec = durationSec,
                         partial = false,
                         // 真实扩展名：FLAC 就存成 .flac，别一律 .mp3
-                        ext = extOf(file.fileName),
+                        ext = extOf(fileName),
                         extraHeaders = mapOf(
-                            "Cookie" to cookieProvider(),
+                            // 必须用签发这条直链时刷新出来的 __puus，
+                            // 否则正式下载还是会被 Tengine 412
+                            "Cookie" to linkCookie.ifBlank { cookieProvider() },
                             "Referer" to "https://pan.quark.cn/",
                         ),
                     )

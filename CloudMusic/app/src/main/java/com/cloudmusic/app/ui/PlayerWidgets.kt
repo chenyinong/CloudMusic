@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cast
+import androidx.compose.material.icons.filled.FormatListNumbered
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Schedule
@@ -48,7 +50,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
-import androidx.media3.common.Player
 
 /**
  * 网易云风格的进度条：一条细线 + 一个圆点，能拖。
@@ -137,17 +138,35 @@ fun PlayerSeekBar(
     }
 }
 
+/** 每种播放模式一个专属图标，一眼能分清，不再靠颜色深浅猜。 */
+private val PlayMode.icon: ImageVector
+    get() = when (this) {
+        PlayMode.LIST_LOOP -> Icons.Filled.Repeat
+        PlayMode.SHUFFLE -> Icons.Filled.Shuffle
+        PlayMode.SEQUENTIAL -> Icons.Filled.FormatListNumbered
+        PlayMode.SINGLE_LOOP -> Icons.Filled.RepeatOne
+    }
+
+private val PlayMode.label: String
+    get() = when (this) {
+        PlayMode.LIST_LOOP -> "循环播放"
+        PlayMode.SHUFFLE -> "随机播放"
+        PlayMode.SEQUENTIAL -> "顺序播放"
+        PlayMode.SINGLE_LOOP -> "单曲循环"
+    }
+
 /**
- * 网易云风格的主控制栏：循环 / 上一首 / 播放 / 下一首 / 播放列表。
+ * 主控制栏：播放模式 / 上一首 / 播放 / 下一首 / 播放列表。
+ * 模式不走「点一下切一个」了，改成点开菜单直接选，当前项高亮。
  */
 @Composable
 fun PlayerControlBar(
     playing: Boolean,
-    repeatMode: Int,
+    playMode: PlayMode,
     onToggle: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
-    onCycleRepeat: () -> Unit,
+    onSelectMode: (PlayMode) -> Unit,
     onShowQueue: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -156,21 +175,37 @@ fun PlayerControlBar(
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconButton(onClick = onCycleRepeat, modifier = Modifier.size(42.dp)) {
-            Icon(
-                imageVector = if (repeatMode == Player.REPEAT_MODE_ONE) {
-                    Icons.Filled.RepeatOne
-                } else {
-                    Icons.Filled.Repeat
-                },
-                contentDescription = "循环模式",
-                tint = if (repeatMode == Player.REPEAT_MODE_OFF) {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                } else {
-                    MaterialTheme.colorScheme.primary
-                },
-                modifier = Modifier.size(22.dp)
-            )
+        var showModeMenu by remember { mutableStateOf(false) }
+        Box {
+            IconButton(onClick = { showModeMenu = true }, modifier = Modifier.size(42.dp)) {
+                Icon(
+                    imageVector = playMode.icon,
+                    contentDescription = "播放模式：${playMode.label}",
+                    tint = if (playMode == PlayMode.SEQUENTIAL) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+            AppDropdownMenu(
+                expanded = showModeMenu,
+                onDismissRequest = { showModeMenu = false },
+                width = 142.dp
+            ) {
+                PlayMode.entries.forEach { mode ->
+                    AppMenuItem(
+                        text = mode.label,
+                        icon = mode.icon,
+                        highlight = mode == playMode,
+                        onClick = {
+                            showModeMenu = false
+                            onSelectMode(mode)
+                        }
+                    )
+                }
+            }
         }
 
         IconButton(onClick = onPrevious, modifier = Modifier.size(48.dp)) {

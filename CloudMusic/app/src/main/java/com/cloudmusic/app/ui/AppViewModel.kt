@@ -397,26 +397,39 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private set
 
     /** 实时校验夸克登录态的进度与上次校验时刻 */
-    var quarkCheckState by mutableStateOf(QuarkCheckState.IDLE)
+    // 结果持久化：重启后进设置页哪怕撞上冷却，也能立刻显示上次的「已失效」，不会一片空白
+    var quarkCheckState by mutableStateOf(
+        if (prefs.quarkLoggedIn && prefs.quarkCheckAt > 0L) {
+            if (prefs.quarkCheckOk) QuarkCheckState.VALID else QuarkCheckState.INVALID
+        } else {
+            QuarkCheckState.IDLE
+        }
+    )
         private set
 
     var quarkCheckedAt by mutableStateOf(prefs.quarkCheckAt)
         private set
 
+    /** 上次校验失败的原因（网络异常 / 夸克返回的 code），给设置页排查用 */
+    var quarkCheckReason by mutableStateOf("")
+        private set
+
     /**
      * 校验夸克登录态：真的拿 cookie 请求一次才知道失效没有。
-     * 进设置页自动校验（带 5 分钟冷却），「重新验证」按钮走 force。
+     * 每次进设置页、点「重新验证」都实打实请求一次 —— 之前带冷却，
+     * 刚过期的 cookie 会因为在冷却期内被跳过，继续显示「有效」。
      */
-    fun checkQuarkLogin(force: Boolean = false) {
+    fun checkQuarkLogin() {
         if (!quarkLoggedIn) return
         if (quarkCheckState == QuarkCheckState.CHECKING) return
-        if (!force && System.currentTimeMillis() - prefs.quarkCheckAt < 5 * 60_000L) return
 
         quarkCheckState = QuarkCheckState.CHECKING
         viewModelScope.launch {
             val check = appRef.quarkClient.checkLogin()
             prefs.quarkCheckAt = System.currentTimeMillis()
+            prefs.quarkCheckOk = check.ok
             quarkCheckedAt = prefs.quarkCheckAt
+            quarkCheckReason = check.reason
             // 拿着失效的 cookie 也可能拉回昵称缓存，所以只有验证通过才刷新昵称
             if (check.ok && check.nickname.isNotBlank()) {
                 prefs.quarkAccount = check.nickname
@@ -431,6 +444,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         prefs.saveQuark(cookie, "")
         quarkLoggedIn = prefs.quarkLoggedIn
         quarkAccount = prefs.quarkAccount
+        // 新 cookie 立刻重新校验，别沿用上一份的「已失效」
+        prefs.quarkCheckAt = 0L
+        prefs.quarkCheckOk = false
+        quarkCheckedAt = 0L
+        quarkCheckReason = ""
         quarkCheckState = QuarkCheckState.IDLE
         viewModelScope.launch {
             // 顺便把账号昵称拉回来，界面上好看点
@@ -448,6 +466,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         quarkAccount = ""
         quarkCheckState = QuarkCheckState.IDLE
         quarkCheckedAt = 0L
+        quarkCheckReason = ""
         // 退出即把 WebView 里的夸克登录态也清掉（否则下次进登录页还认得老账号，
         // 会立刻自动重新登录回 App，看着就像「没退出干净」）。
         val cm = CookieManager.getInstance()
