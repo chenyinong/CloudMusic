@@ -1,5 +1,6 @@
 package com.cloudmusic.app.ui
 
+import android.graphics.Bitmap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
@@ -129,4 +130,70 @@ private fun DrawScope.drawHill(color: Color, left: Float, baseY: Float, width: F
         close()
     }
     drawPath(path, color)
+}
+
+/**
+ * 从封面位图提取一个主题色，给播放页的氛围渐变用。
+ *
+ * 做法：采样约 4k 个像素，按 12 个色相桶做「饱和度 × 明度」加权投票，
+ * 取权重最大的桶求平均。死黑、纯白和无彩的灰不参与投票；
+ * 黑白封面提不出色相时返回 null，调用方回落到 [coverColors] 的歌名调色板。
+ *
+ * 平均会把颜色揉得又灰又闷，最后把 HSV 归一到「中饱和、中亮」区间 ——
+ * 观感对齐歌名调色板那档柔和明快的淡彩，渐变过渡才不会发脏。
+ */
+fun extractCoverPalette(bmp: Bitmap): Color? {
+    val w = bmp.width
+    val h = bmp.height
+    if (w <= 0 || h <= 0) return null
+
+    val weight = FloatArray(12)
+    val sumR = FloatArray(12)
+    val sumG = FloatArray(12)
+    val sumB = FloatArray(12)
+    val pixels = IntArray(w * h)
+    bmp.getPixels(pixels, 0, w, 0, 0, w, h)
+    val step = maxOf(1, pixels.size / 4096)
+
+    var i = 0
+    while (i < pixels.size) {
+        val p = pixels[i]
+        val r = (p shr 16 and 0xFF) / 255f
+        val g = (p shr 8 and 0xFF) / 255f
+        val b = (p and 0xFF) / 255f
+        val max = maxOf(r, g, b)
+        val min = minOf(r, g, b)
+        val v = max
+        val s = if (max > 0f) (max - min) / max else 0f
+        if (v >= 0.12f && s >= 0.15f && !(v > 0.96f && s < 0.10f)) {
+            var hue = when {
+                max == min -> 0f
+                max == r -> 60f * (g - b) / (max - min)
+                max == g -> 60f * (2f + (b - r) / (max - min))
+                else -> 60f * (4f + (r - g) / (max - min))
+            }
+            if (hue < 0f) hue += 360f
+            val bucket = (hue / 30f).toInt().coerceIn(0, 11)
+            val wt = s * v
+            weight[bucket] += wt
+            sumR[bucket] += r * wt
+            sumG[bucket] += g * wt
+            sumB[bucket] += b * wt
+        }
+        i += step
+    }
+
+    val best = weight.indices.maxByOrNull { weight[it] } ?: return null
+    if (weight[best] <= 0f) return null
+
+    val hsv = FloatArray(3)
+    android.graphics.Color.RGBToHSV(
+        (sumR[best] / weight[best] * 255f).toInt(),
+        (sumG[best] / weight[best] * 255f).toInt(),
+        (sumB[best] / weight[best] * 255f).toInt(),
+        hsv
+    )
+    hsv[1] = hsv[1].coerceIn(0.58f, 0.88f)
+    hsv[2] = hsv[2].coerceIn(0.62f, 0.92f)
+    return Color(android.graphics.Color.HSVToColor(hsv))
 }

@@ -6,6 +6,7 @@ import android.webkit.CookieManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.cloudmusic.app.App
@@ -125,6 +126,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var coverUrl by mutableStateOf<String?>(null)
         private set
 
+    /** 当前歌曲封面提出来的主题色；封面还没查到（或黑白封面）时为 null，回落歌名调色板 */
+    var coverThemeColor by mutableStateOf<Color?>(null)
+        private set
+
     private var coverJob: Job? = null
 
     /** 正在查封面的曲目，避免同一首重复发请求 */
@@ -143,13 +148,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             coverJob?.cancel()
             coverLoadingId = null
             coverUrl = null
+            coverThemeColor = null
             return
         }
         // 已经拿到过（或确认没有），直接用
         coverCache[id]?.let {
             coverJob?.cancel()
             coverLoadingId = null
-            coverUrl = it.ifBlank { null }
+            val url = it.ifBlank { null }
+            coverUrl = url
+            // 别挂着上一首的颜色，先回落，封面色马上从位图缓存里取回来
+            coverThemeColor = null
+            updateCoverTheme(track, url)
             return
         }
         // 正在查同一首，等着就行
@@ -159,12 +169,29 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         coverLoadingId = id
         // 新歌还没查到封面：先清掉上一首的，别让旧封面挂在新歌上
         coverUrl = null
+        coverThemeColor = null
         coverJob = viewModelScope.launch {
             val url = appRef.coverRepository.load(track)
             coverCache[id] = url ?: ""
             // 查完还在听这首才上图，不然刚切走的歌把新歌的封面顶掉了
-            if (player.currentTrack?.key == id) coverUrl = url
+            if (player.currentTrack?.key == id) {
+                coverUrl = url
+                updateCoverTheme(track, url)
+            }
             coverLoadingId = null
+        }
+    }
+
+    /** 从封面位图提取主题色（命中内存缓存就是纯计算），失败保持回落色。 */
+    private fun updateCoverTheme(track: Track, url: String?) {
+        viewModelScope.launch {
+            val colors = withContext(Dispatchers.IO) {
+                url?.let { u ->
+                    appRef.coverRepository.artwork(u)?.let { extractCoverPalette(it) }
+                }
+            }
+            // 算完还在听这首才生效，不然切走的歌把颜色顶回来
+            if (player.currentTrack?.key == track.key) coverThemeColor = colors
         }
     }
 

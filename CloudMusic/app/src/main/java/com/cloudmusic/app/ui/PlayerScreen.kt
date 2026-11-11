@@ -1,5 +1,7 @@
 package com.cloudmusic.app.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
@@ -207,7 +209,10 @@ fun PlayerScreen(
         }
     }
 
-    val bgColors = coverColors(title)
+    // 氛围背景：优先从封面取一个主色，封面还没查到（或黑白封面）时回落歌名调色板；
+    // 换歌时颜色平滑过渡，不跳变
+    val bgBase = vm.coverThemeColor ?: coverColors(title)[0]
+    val bgTop by animateColorAsState(bgBase, tween(durationMillis = 600), label = "bgTop")
 
     /**
      * 从左边缘往右滑 = 返回上一层（跟 QQ 音乐一样）。
@@ -253,7 +258,7 @@ fun PlayerScreen(
                     listOf(
                         Color.Transparent,
                         Color.Transparent,
-                        bgColors[0].copy(alpha = 0.45f)
+                        bgTop.copy(alpha = 0.62f)
                     )
                 )
             )
