@@ -46,6 +46,7 @@ class Prefs(context: Context) {
         private const val KEY_QUARK_COOKIE = "quark_cookie"
         private const val KEY_QUARK_ACCOUNT = "quark_account"
         private const val KEY_QUARK_LOGIN_AT = "quark_login_at"
+        private const val KEY_QUARK_CHECK_AT = "quark_check_at"
         private const val KEY_DAV_CAPACITY = "dav_capacity_bytes"
         private const val KEY_DAV_USED = "dav_used_bytes"
         private const val KEY_IMPORTED = "imported_tracks"
@@ -249,6 +250,11 @@ class Prefs(context: Context) {
         get() = sp.getLong(KEY_QUARK_LOGIN_AT, 0L)
         set(v) = sp.edit().putLong(KEY_QUARK_LOGIN_AT, v).apply()
 
+    /** 上次实时校验登录态的时刻，自动校验用它做冷却 */
+    var quarkCheckAt: Long
+        get() = sp.getLong(KEY_QUARK_CHECK_AT, 0L)
+        set(v) = sp.edit().putLong(KEY_QUARK_CHECK_AT, v).apply()
+
     val quarkLoggedIn: Boolean
         get() = quarkCookie.contains("__pus") && quarkCookie.isNotBlank()
 
@@ -271,6 +277,7 @@ class Prefs(context: Context) {
             .remove(KEY_QUARK_COOKIE)
             .remove(KEY_QUARK_ACCOUNT)
             .remove(KEY_QUARK_LOGIN_AT)
+            .remove(KEY_QUARK_CHECK_AT)
             .apply()
     }
 

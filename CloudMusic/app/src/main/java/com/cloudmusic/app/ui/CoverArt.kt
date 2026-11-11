@@ -193,7 +193,7 @@ fun extractCoverPalette(bmp: Bitmap): Color? {
         (sumB[best] / weight[best] * 255f).toInt(),
         hsv
     )
-    hsv[1] = hsv[1].coerceIn(0.50f, 0.78f)
+    hsv[1] = hsv[1].coerceIn(0.40f, 0.68f)
     hsv[2] = hsv[2].coerceIn(0.62f, 0.92f)
     return Color(android.graphics.Color.HSVToColor(hsv))
 }

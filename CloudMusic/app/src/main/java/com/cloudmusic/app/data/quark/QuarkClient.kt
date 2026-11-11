@@ -708,8 +708,38 @@ class QuarkClient(
         }
     }
 
+    /**
+     * 实时校验登录态：调会员接口，code==0 且有 data 即有效。
+     *
+     * 本地只判断「cookie 里有没有 __pus」是看不出失效的 ——
+     * 夸克风控、换设备登录都会让 cookie 提前作废，
+     * 只有真的拿它请求一次才知道还能不能用。
+     */
+    suspend fun checkLogin(): QuarkSessionCheck = withContext(Dispatchers.IO) {
+        try {
+            val json = getJson("$HOST/1/clouddrive/member?pr=ucpro&fr=pc")
+            val data = json.optJSONObject("data")
+            val member = data?.optJSONObject("member") ?: data
+            val nick = member?.optString("nick").orEmpty()
+                .ifBlank { member?.optString("name").orEmpty() }
+            QuarkSessionCheck(
+                ok = json.optInt("code", -1) == 0 && data != null,
+                nickname = nick,
+            )
+        } catch (e: Exception) {
+            QuarkSessionCheck(ok = false, nickname = "")
+        }
+    }
+
     private fun enc(s: String): String = URLEncoder.encode(s, "UTF-8")
 }
 
 /** 夸克接口出错。 */
 class QuarkException(message: String) : Exception(message)
+
+/** 登录态实时校验结果：ok=false 表示 cookie 已失效或网络失败，需重新登录/重试。 */
+data class QuarkSessionCheck(
+    val ok: Boolean,
+    /** 顺手带回的账号昵称，空串表示没拿到 */
+    val nickname: String,
+)

@@ -44,6 +44,9 @@ enum class Screen {
     QUARK_LOGIN, QUARK_DIAG
 }
 
+/** 夸克登录态实时校验的进度。 */
+enum class QuarkCheckState { IDLE, CHECKING, VALID, INVALID }
+
 /** 歌词面板的状态。 */
 data class LyricsUiState(
     val loading: Boolean = false,
@@ -381,14 +384,54 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** 夸克登录态是不是该换了（cookie 一般一个多月就失效） */
     val quarkCookieStale: Boolean get() = prefs.quarkCookieStale
 
+    /** 已登录天数，设置页展示有效期用 */
+    val quarkLoginDays: Int
+        get() {
+            if (!quarkLoggedIn) return 0
+            val at = prefs.quarkLoginAt
+            if (at <= 0L) return 0
+            return ((System.currentTimeMillis() - at) / (24 * 3600 * 1000L)).toInt()
+        }
+
     var quarkAccount by mutableStateOf(prefs.quarkAccount)
         private set
+
+    /** 实时校验夸克登录态的进度与上次校验时刻 */
+    var quarkCheckState by mutableStateOf(QuarkCheckState.IDLE)
+        private set
+
+    var quarkCheckedAt by mutableStateOf(prefs.quarkCheckAt)
+        private set
+
+    /**
+     * 校验夸克登录态：真的拿 cookie 请求一次才知道失效没有。
+     * 进设置页自动校验（带 5 分钟冷却），「重新验证」按钮走 force。
+     */
+    fun checkQuarkLogin(force: Boolean = false) {
+        if (!quarkLoggedIn) return
+        if (quarkCheckState == QuarkCheckState.CHECKING) return
+        if (!force && System.currentTimeMillis() - prefs.quarkCheckAt < 5 * 60_000L) return
+
+        quarkCheckState = QuarkCheckState.CHECKING
+        viewModelScope.launch {
+            val check = appRef.quarkClient.checkLogin()
+            prefs.quarkCheckAt = System.currentTimeMillis()
+            quarkCheckedAt = prefs.quarkCheckAt
+            // 拿着失效的 cookie 也可能拉回昵称缓存，所以只有验证通过才刷新昵称
+            if (check.ok && check.nickname.isNotBlank()) {
+                prefs.quarkAccount = check.nickname
+                quarkAccount = check.nickname
+            }
+            quarkCheckState = if (check.ok) QuarkCheckState.VALID else QuarkCheckState.INVALID
+        }
+    }
 
     /** 保存夸克登录态。cookie 来自 WebView 抓取。 */
     fun saveQuarkCookie(cookie: String) {
         prefs.saveQuark(cookie, "")
         quarkLoggedIn = prefs.quarkLoggedIn
         quarkAccount = prefs.quarkAccount
+        quarkCheckState = QuarkCheckState.IDLE
         viewModelScope.launch {
             // 顺便把账号昵称拉回来，界面上好看点
             val name = appRef.quarkClient.accountName()
@@ -403,6 +446,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         prefs.clearQuark()
         quarkLoggedIn = false
         quarkAccount = ""
+        quarkCheckState = QuarkCheckState.IDLE
+        quarkCheckedAt = 0L
         // 退出即把 WebView 里的夸克登录态也清掉（否则下次进登录页还认得老账号，
         // 会立刻自动重新登录回 App，看着就像「没退出干净」）。
         val cm = CookieManager.getInstance()

@@ -42,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -188,10 +189,19 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
             }
 
             // ── 夸克网盘：下载链路的中转站 ────────────────────
+            // 进设置页自动校验一次登录态（5 分钟冷却），失效了当场亮红灯
+            LaunchedEffect(vm.quarkLoggedIn) {
+                if (vm.quarkLoggedIn) vm.checkQuarkLogin()
+            }
+            val quarkInvalid = vm.quarkCheckState == QuarkCheckState.INVALID
             SettingsCard(
                 label = "下载中转",
                 icon = Icons.Filled.CloudDownload,
-                trailing = if (vm.quarkLoggedIn) "已登录" else "未登录"
+                trailing = when {
+                    !vm.quarkLoggedIn -> "未登录"
+                    quarkInvalid -> "已失效"
+                    else -> "已登录"
+                }
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     BrandIcon(Icons.Filled.CloudDownload, Color(0xFF7A5AF8))
@@ -202,7 +212,10 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f)
                     )
-                    if (vm.quarkLoggedIn) StatusBadge("已登录")
+                    if (vm.quarkLoggedIn) StatusBadge(
+                        if (quarkInvalid) "已失效" else "已登录",
+                        error = quarkInvalid
+                    )
                 }
                 Spacer(Modifier.height(8.dp))
                 if (vm.quarkLoggedIn) {
@@ -212,12 +225,36 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(4.dp))
+                    // 登录有效期：夸克 cookie 一般一个多月就失效，别等导歌失败才发现
+                    val days = vm.quarkLoginDays
                     Text(
-                        "「下歌吧」音源已就绪 —— 网易云、酷我都搜不到的歌会走这里。",
+                        if (days >= 30) {
+                            "登录有效期：已登录 $days 天，已超过常见有效期（约 30 天）"
+                        } else {
+                            "登录有效期：已登录 $days 天，约 30 天需重新登录（剩 ${30 - days} 天左右）"
+                        },
                         style = MaterialTheme.typography.labelSmall,
-                        color = Accent
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    if (vm.quarkCookieStale) {
+                    when (vm.quarkCheckState) {
+                        QuarkCheckState.CHECKING -> Text(
+                            "正在验证登录是否有效…",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        QuarkCheckState.VALID -> Text(
+                            "✓ 实时验证：登录有效",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Accent
+                        )
+                        QuarkCheckState.INVALID -> Text(
+                            "✗ 实时验证：登录已失效，导歌会失败，请重新登录",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        QuarkCheckState.IDLE -> {}
+                    }
+                    if (vm.quarkCookieStale && !quarkInvalid) {
                         Spacer(Modifier.height(4.dp))
                         Text(
                             "登录状态可能过期了，导歌失败的话重新登录一次",
@@ -229,6 +266,9 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         SmallButton("直链诊断", Accent) {
                             vm.screen = Screen.QUARK_DIAG
+                        }
+                        SmallButton("重新验证", MaterialTheme.colorScheme.onSurfaceVariant) {
+                            vm.checkQuarkLogin(force = true)
                         }
                         SmallButton("退出登录", MaterialTheme.colorScheme.error) {
                             vm.clearQuark()
@@ -460,13 +500,15 @@ private fun BrandIcon(icon: ImageVector, bg: Color) {
     }
 }
 
-/** 「已连接 / 已登录」绿色胶囊徽章。 */
+/** 「已连接 / 已登录」绿色胶囊徽章；error=true 变红色「已失效」样式。 */
 @Composable
-private fun StatusBadge(text: String) {
+private fun StatusBadge(text: String, error: Boolean = false) {
+    val tint = if (error) MaterialTheme.colorScheme.error else BadgeGreen
+    val bg = if (error) MaterialTheme.colorScheme.error.copy(alpha = 0.08f) else BadgeGreenBg
     Row(
         Modifier
             .clip(RoundedCornerShape(999.dp))
-            .background(BadgeGreenBg)
+            .background(bg)
             .padding(horizontal = 8.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -474,14 +516,14 @@ private fun StatusBadge(text: String) {
             Modifier
                 .size(5.dp)
                 .clip(CircleShape)
-                .background(BadgeGreen)
+                .background(tint)
         )
         Spacer(Modifier.width(4.dp))
         Text(
             text,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Medium,
-            color = BadgeGreen
+            color = tint
         )
     }
 }
