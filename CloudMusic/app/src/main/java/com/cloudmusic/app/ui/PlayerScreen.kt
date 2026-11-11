@@ -250,16 +250,14 @@ fun PlayerScreen(
             .fillMaxSize()
             .then(edgeBackGesture)
     ) {
-        // QQ 音乐：顶部近白、底部一抹封面淡彩晕染（克制，不整页彩）
+        // 氛围背景：封面页和歌词页统一用整页淡彩（顶部很淡、越往下越足）
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface))
         Box(
             Modifier.fillMaxSize().background(
                 Brush.verticalGradient(
-                    listOf(
-                        Color.Transparent,
-                        Color.Transparent,
-                        bgTop.copy(alpha = 0.62f)
-                    )
+                    0f to bgTop.copy(alpha = 0.14f),
+                    0.42f to bgTop.copy(alpha = 0.26f),
+                    1f to bgTop.copy(alpha = 0.72f)
                 )
             )
         )
@@ -418,14 +416,12 @@ fun PlayerScreen(
             )
             formatBadge(track?.fileName)?.let { badge ->
                 Spacer(Modifier.width(8.dp))
+                // 不要胶囊底了：整页淡彩背景上那块灰底很突兀，跟歌手同字号淡灰就行
                 Text(
                     badge,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Normal,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
