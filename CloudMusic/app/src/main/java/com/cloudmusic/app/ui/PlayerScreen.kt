@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.QueueMusic
@@ -394,12 +395,24 @@ fun PlayerScreen(
                     .basicMarquee()
             )
             Spacer(Modifier.width(14.dp))
-            Icon(
-                Icons.Filled.FavoriteBorder,
-                contentDescription = "喜欢",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(24.dp)
-            )
+            // 小红心：点一下就把这首歌收藏到云端，网页版同步可见。
+            // 之前这是个纯装饰的图标，看着能点其实点了没反应。
+            val favOn = track != null && vm.isCloudFavorite(track)
+            IconButton(
+                onClick = {
+                    val t = track
+                    if (t != null) vm.toggleCloudFavorite(t)
+                },
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    if (favOn) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                    contentDescription = if (favOn) "取消云端收藏" else "收藏到云端",
+                    tint = if (favOn) Color(0xFFE8546F)
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
         }
         // 歌手 + 音质标签：原来那个裸「+」字符没有交互，只会让这行变吵，去掉
         Row(

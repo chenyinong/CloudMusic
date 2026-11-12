@@ -233,6 +233,9 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
     // ------------------------------------------------------------ 载入
 
     fun load(key: String) {
+        // 进页面时把「点占位歌」的接管者抢回来 ——
+        // 云端那边也注册过同一个回调，不抢的话点未解析的歌会走错分支。
+        player.onUnresolvedPick = { track -> onQueuePlaceholderPicked(track) }
         loading = true
         partialKeys = emptySet()
         cloudReady = appRef.quarkClient.loggedIn
@@ -269,9 +272,17 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
      *
      * 只删 App 里的这张清单，已经导进网盘的歌不动 —— 它们还在曲库里，
      * 照常能播。删完 [onDone] 回调让页面退回列表。
+     *
+     * 已经同步到云端的那张，云端那份也一起删 —— 两边是同一张单，
+     * 只删一半的话「云端歌单」分组里还杵着一张，看着像没删掉。
      */
     fun deletePlaylist(key: String, onDone: () -> Unit) {
         viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) { store.playlist(key) }
+            val cloudId = saved?.cloudId ?: 0L
+            if (cloudId > 0 && appRef.prefs.cloudLoggedIn) {
+                runCatching { appRef.cloudSync.deletePlaylist(cloudId) }
+            }
             withContext(Dispatchers.IO) { store.delete(key) }
             onDone()
         }

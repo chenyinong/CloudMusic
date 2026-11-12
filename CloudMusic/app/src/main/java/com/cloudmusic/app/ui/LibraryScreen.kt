@@ -20,10 +20,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
@@ -49,6 +52,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,10 +64,20 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cloudmusic.app.data.ProviderKind
 import com.cloudmusic.app.data.Track
+import com.cloudmusic.app.data.cloud.CloudTrack
+
+/**
+ * 曲库筛选里的「云端」这一档。
+ *
+ * 网盘筛选用的是 provider id（webdav / onedrive），云端不是网盘，
+ * 用一个不会跟它们撞上的特殊值。
+ */
+const val FILTER_CLOUD = "cloud"
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -85,17 +100,21 @@ fun LibraryScreen(
         tracks.map { it.artist.trim() }.filter { it.isNotBlank() }.distinct().size
     }
     val filtered = remember(tracks, query, providerFilter, sortMode) {
-        val byProvider = if (providerFilter == null) tracks
-        else tracks.filter { it.provider == providerFilter }
-        val matched = if (query.isBlank()) byProvider else byProvider.filter {
-            it.title.contains(query, true) ||
-                it.artist.contains(query, true) ||
-                it.album.contains(query, true)
-        }
-        when (sortMode) {
-            1 -> matched.sortedBy { it.title.lowercase() }
-            2 -> matched.sortedBy { it.artist.lowercase() }
-            else -> matched
+        // 「云端」这一档不看网盘，云端的歌单独一栏渲染
+        if (providerFilter == FILTER_CLOUD) emptyList()
+        else {
+            val byProvider = if (providerFilter == null) tracks
+            else tracks.filter { it.provider == providerFilter }
+            val matched = if (query.isBlank()) byProvider else byProvider.filter {
+                it.title.contains(query, true) ||
+                    it.artist.contains(query, true) ||
+                    it.album.contains(query, true)
+            }
+            when (sortMode) {
+                1 -> matched.sortedBy { it.title.lowercase() }
+                2 -> matched.sortedBy { it.artist.lowercase() }
+                else -> matched
+            }
         }
     }
 
@@ -105,6 +124,23 @@ fun LibraryScreen(
     var coverTrack by remember { mutableStateOf<Track?>(null) }
     // 待确认删除的曲目。删的是网盘里的文件，删了就没了，先问一句。
     var pendingDelete by remember { mutableStateOf<Track?>(null) }
+
+    // 云端收藏（网页版同步过来的），单独一栏显示
+    val cloudFavorites by vm.cloudFavorites.collectAsState()
+
+    // 进页面顺手拉一次云端收藏（网页端可能刚改过）
+    LaunchedEffect(Unit) { vm.refreshCloudFavorites() }
+
+    val cloudFavs = remember(cloudFavorites, query) {
+        if (query.isBlank()) cloudFavorites else cloudFavorites.filter {
+            it.title.contains(query, true) ||
+                it.artist.contains(query, true) ||
+                it.album.contains(query, true)
+        }
+    }
+
+    // 「云端」胶囊选中时，列表只剩云端收藏
+    val cloudOnly = providerFilter == FILTER_CLOUD
 
     Scaffold(
         // 跟主题走：写死浅灰底的话，暗色模式会变成「浅底 + 白字」，整页看不清
@@ -145,7 +181,8 @@ fun LibraryScreen(
                 LibraryHero(
                     trackCount = tracks.size,
                     providerCount = providers.size,
-                    artistCount = artistCount
+                    artistCount = artistCount,
+                    cloudCount = if (vm.cloudLoggedIn) cloudFavs.size else 0
                 )
             }
 
@@ -181,7 +218,9 @@ fun LibraryScreen(
                         .background(MaterialTheme.colorScheme.primary)
                         .clickable {
                             // 播放全部只出声，不跳页：想看播放页点底部迷你条
-                            if (filtered.isNotEmpty()) {
+                            if (cloudOnly) {
+                                if (cloudFavs.isNotEmpty()) vm.playCloudQueue(cloudFavs)
+                            } else if (filtered.isNotEmpty()) {
                                 vm.player.play(filtered, 0)
                             }
                         },
@@ -202,7 +241,7 @@ fun LibraryScreen(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        "${filtered.size} 首歌曲",
+                        if (cloudOnly) "${cloudFavs.size} 首云端歌曲" else "${filtered.size} 首歌曲",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -231,37 +270,59 @@ fun LibraryScreen(
                 }
             }
 
-            // 挂了多个网盘时可以按网盘筛（轻量小胶囊，不要 FilterChip 那种粗边框）
-            if (providers.size > 1) {
-                // 和上面「播放全部」拉开一点，两行控件别挤成一坨
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    val options = listOf<Pair<String?, String>>(null to "全部") +
-                        providers.map { it.id to it.shortLabel }
-                    options.forEach { (id, label) ->
-                        val selected = providerFilter == id
-                        Text(
-                            label,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (selected) MaterialTheme.colorScheme.onPrimary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(9.dp))
-                                .background(
-                                    if (selected) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.surfaceVariant
-                                )
-                                .clickable { onProviderFilterChange(id) }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                        )
-                    }
+            // 按网盘 / 按云端筛选（轻量小胶囊，不要 FilterChip 那种粗边框）
+            // 云端收藏占一档，跟网盘胶囊排在同一行
+            // 和上面「播放全部」拉开一点，两行控件别挤成一坨
+            Spacer(Modifier.height(8.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                val options = listOf<Pair<String?, String>>(null to "全部") +
+                    providers.map { it.id to it.shortLabel }
+                options.forEach { (id, label) ->
+                    val selected = providerFilter == id
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                        color = if (selected) MaterialTheme.colorScheme.onPrimary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(
+                                if (selected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.surfaceVariant
+                            )
+                            .clickable { onProviderFilterChange(id) }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
                 }
+                // 云端胶囊：跟网盘并排。没登录时点它去登录页
+                val selected = cloudOnly
+                Text(
+                    "云端",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                    color = if (selected) MaterialTheme.colorScheme.onPrimary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(
+                            if (selected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surfaceVariant
+                        )
+                        .clickable {
+                            if (vm.cloudLoggedIn) {
+                                onProviderFilterChange(if (selected) null else FILTER_CLOUD)
+                            } else {
+                                vm.openCloudLogin()
+                            }
+                        }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                )
             }
 
             if (status.isNotBlank()) {
@@ -286,48 +347,88 @@ fun LibraryScreen(
                 }
             }
 
-            if (filtered.isEmpty()) {
-                item(key = "empty") {
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(top = 56.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            Icons.Filled.MusicNote,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
-                            modifier = Modifier.size(40.dp)
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        Text(
-                            if (tracks.isEmpty()) "还没有歌曲，点右上角刷新扫描网盘" else "没有匹配的歌曲",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+            // 选了「云端」这一档，网盘的歌就不列了 —— 只剩云端收藏
+            if (!cloudOnly) {
+                if (filtered.isEmpty()) {
+                    item(key = "empty") {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(top = 56.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                Icons.Filled.MusicNote,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                                modifier = Modifier.size(40.dp)
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                when {
+                                    tracks.isEmpty() && cloudFavs.isEmpty() ->
+                                        "还没有歌曲，点右上角刷新扫描网盘"
+                                    tracks.isEmpty() -> "网盘里还没有歌，下面是云端收藏"
+                                    else -> "没有匹配的歌曲"
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else {
+                    itemsIndexed(filtered, key = { _, t -> t.key }) { _, track ->
+                        TrackRow(
+                            track = track,
+                            showProvider = providers.size > 1,
+                            playing = vm.player.currentTrack?.key == track.key,
+                            favorite = vm.isCloudFavorite(track),
+                            onClick = {
+                                // 点歌只出声，不跳页：想看播放页点底部迷你条
+                                vm.player.play(filtered, filtered.indexOf(track))
+                            },
+                            onEnqueue = { vm.player.enqueue(track) },
+                            onShowInfo = { infoTrack = track },
+                            onSetCover = { coverTrack = track },
+                            onRefreshCover = { vm.refreshCover(track) },
+                            onCorrectTags = { vm.correctTrackTags(track) },
+                            onToggleFavorite = { vm.toggleCloudFavorite(track) }
                         )
                     }
                 }
-            } else {
-                itemsIndexed(filtered, key = { _, t -> t.key }) { _, track ->
-                    TrackRow(
-                        track = track,
-                        showProvider = providers.size > 1,
-                        playing = vm.player.currentTrack?.key == track.key,
-                        onClick = {
-                            // 点歌只出声，不跳页：想看播放页点底部迷你条
-                            vm.player.play(filtered, filtered.indexOf(track))
-                        },
-                        onEnqueue = { vm.player.enqueue(track) },
-                        onShowInfo = { infoTrack = track },
-                        onSetCover = { coverTrack = track },
-                        onRefreshCover = { vm.refreshCover(track) },
-                        onCorrectTags = { vm.correctTrackTags(track) }
-                    )
-                }
-                // 底部留白由 Root 统一处理（迷你播放器 + 导航栏）
-                item { Spacer(Modifier.height(16.dp)) }
             }
+
+            // 云端收藏：网页版收藏同步过来的歌，跟网盘曲库分开一栏
+            if (vm.cloudLoggedIn && (cloudOnly || cloudFavs.isNotEmpty())) {
+                item(key = "cloud-header") {
+                    CloudFavoritesHeader(count = cloudFavs.size, only = cloudOnly)
+                }
+                if (cloudFavs.isEmpty()) {
+                    item(key = "cloud-empty") {
+                        Text(
+                            "云端还没有收藏，网页版收藏的歌会出现在这儿",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(32.dp),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                } else {
+                    items(cloudFavs, key = { "cloud-${it.key}" }) { t ->
+                        CloudTrackRow(
+                            track = t,
+                            playing = vm.player.currentTrack?.key == "cloud:${t.key}",
+                            onClick = { vm.playCloudTrack(t, cloudFavs) },
+                            onRemove = { vm.removeCloudFavorite(t) }
+                        )
+                    }
+                }
+            }
+
+            // 底部留白由 Root 统一处理（迷你播放器 + 导航栏）
+            item { Spacer(Modifier.height(16.dp)) }
         }
     }
 
@@ -380,7 +481,12 @@ fun LibraryScreen(
  * 颜色不跟主题主色走，深浅模式都保留这块「深色名片」的对比。
  */
 @Composable
-private fun LibraryHero(trackCount: Int, providerCount: Int, artistCount: Int) {
+private fun LibraryHero(
+    trackCount: Int,
+    providerCount: Int,
+    artistCount: Int,
+    cloudCount: Int = 0,
+) {
     Box(
         Modifier
             .fillMaxWidth()
@@ -460,6 +566,21 @@ private fun LibraryHero(trackCount: Int, providerCount: Int, artistCount: Int) {
                     style = MaterialTheme.typography.labelMedium,
                     color = Color.White.copy(alpha = 0.78f)
                 )
+                if (cloudCount > 0) {
+                    Spacer(Modifier.width(14.dp))
+                    Box(
+                        Modifier
+                            .size(3.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.32f))
+                    )
+                    Spacer(Modifier.width(14.dp))
+                    Text(
+                        "$cloudCount 首云端",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color.White.copy(alpha = 0.78f)
+                    )
+                }
             }
         }
     }
@@ -482,6 +603,9 @@ private fun TrackRow(
     onSetCover: () -> Unit,
     onRefreshCover: () -> Unit,
     onCorrectTags: () -> Unit,
+    /** 这首歌是不是已经收藏到云端了（红心亮不亮） */
+    favorite: Boolean = false,
+    onToggleFavorite: (() -> Unit)? = null,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     // 第二行只放歌手；挂了多个网盘时补个来源标签
@@ -502,20 +626,35 @@ private fun TrackRow(
         showDivider = false,
         onClick = onClick
     ) {
-        // 行尾只留竖三点：加入队列收进菜单里，别占一列
-        Box {
-            IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(30.dp)) {
-                Icon(
-                    Icons.Filled.MoreVert,
-                    contentDescription = "更多",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(19.dp)
-                )
+        // 行尾：小红心（收藏到云端）+ 竖三点
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (onToggleFavorite != null) {
+                IconButton(
+                    onClick = { onToggleFavorite() },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        if (favorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                        contentDescription = if (favorite) "取消云端收藏" else "收藏到云端",
+                        tint = if (favorite) Color(0xFFE8546F)
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
-            AppDropdownMenu(
-                expanded = menuOpen,
-                onDismissRequest = { menuOpen = false }
-            ) {
+            Box {
+                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(30.dp)) {
+                    Icon(
+                        Icons.Filled.MoreVert,
+                        contentDescription = "更多",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+                AppDropdownMenu(
+                    expanded = menuOpen,
+                    onDismissRequest = { menuOpen = false }
+                ) {
                 AppMenuHeader(track.title, coverSeed = track.title, track = track)
                 HorizontalDivider(
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
@@ -564,10 +703,142 @@ private fun TrackRow(
                     menuOpen = false
                     onCorrectTags()
                 }
+                if (onToggleFavorite != null) {
+                    AppMenuItem(
+                        text = if (favorite) "取消云端收藏" else "收藏到云端",
+                        icon = if (favorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder
+                    ) {
+                        menuOpen = false
+                        onToggleFavorite()
+                    }
+                }
+                }
             }
         }
     }
 }
+
+/**
+ * 「云端收藏」分区的标题。
+ *
+ * 跟网盘曲库分开一栏 —— 云端的歌没有本地文件，混在一起会让人以为
+ * 点得进就一定播得出。
+ */
+@Composable
+private fun CloudFavoritesHeader(count: Int, only: Boolean = false) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            Icons.Filled.Cloud,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(15.dp)
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            "云端收藏",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            if (only) "$count 首 · 云端" else "$count 首 · 与网页版同步",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/**
+ * 云端收藏里的一行。
+ *
+ * 云端的歌没有本地文件，点它是在本机解析一条直链出来播，
+ * 所以副标题后面标一下来源，别让人以为是网盘里的文件。
+ */
+@Composable
+private fun CloudTrackRow(
+    track: CloudTrack,
+    playing: Boolean,
+    onClick: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    SongRow(
+        coverSeed = track.album.ifBlank { track.title },
+        coverTrack = track.toCoverTrack(),
+        title = track.title,
+        subtitle = buildString {
+            append(track.artist.ifBlank { "未知歌手" })
+            append(" · 云端")
+        },
+        playing = playing,
+        badge = if (track.durationSec > 0) "${track.durationSec}s" else null,
+        showDivider = false,
+        onClick = onClick
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // 云端收藏默认就是红的，点一下取消收藏
+            IconButton(
+                onClick = { onRemove() },
+                modifier = Modifier.size(30.dp)
+            ) {
+                Icon(
+                    Icons.Filled.Favorite,
+                    contentDescription = "取消云端收藏",
+                    tint = Color(0xFFE8546F),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Box {
+                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(30.dp)) {
+                    Icon(
+                        Icons.Filled.MoreVert,
+                        contentDescription = "更多",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+                AppDropdownMenu(
+                    expanded = menuOpen,
+                    onDismissRequest = { menuOpen = false }
+                ) {
+                    AppMenuHeader(track.title, coverSeed = track.title, track = track.toCoverTrack())
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                    )
+                    AppMenuItem(text = "播放", icon = Icons.Outlined.PlayArrow, highlight = true) {
+                        menuOpen = false
+                        onClick()
+                    }
+                    AppMenuItem(text = "取消云端收藏", icon = Icons.Outlined.FavoriteBorder) {
+                        menuOpen = false
+                        onRemove()
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 云端歌曲借一张本地曲库身份去查封面（按歌名歌手检索）。 */
+private fun CloudTrack.toCoverTrack(): Track = Track(
+    key = "cloud-cover:$key",
+    id = key,
+    url = "",
+    fileName = "",
+    title = title,
+    artist = artist,
+    album = album,
+    folder = "",
+    size = 0L,
+    mime = "audio/*",
+    durationSec = durationSec.toDouble(),
+    provider = "cloud",
+)
 
 /** 手动指定封面的对话框：填 URL / 选本地图 / 重新自动查找。 */
 @Composable

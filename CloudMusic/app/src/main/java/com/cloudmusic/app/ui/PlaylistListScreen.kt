@@ -1,6 +1,7 @@
 ﻿package com.cloudmusic.app.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
@@ -39,6 +41,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,12 +51,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.cloudmusic.app.App
 import com.cloudmusic.app.data.Track
+import com.cloudmusic.app.data.cloud.CloudPlaylistRef
 import com.cloudmusic.app.data.playlist.SavedPlaylist
 
 /**
@@ -70,13 +79,27 @@ import com.cloudmusic.app.data.playlist.SavedPlaylist
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun PlaylistListScreen(
+    vm: AppViewModel,
     onBack: () -> Unit,
     onOpenImport: () -> Unit,
     onOpenPlaylist: (String) -> Unit,
+    onOpenCloudPlaylist: (Long) -> Unit,
 ) {
-    val vm: PlaylistListViewModel = viewModel()
+    val listVm: PlaylistListViewModel = viewModel()
 
-    LaunchedEffect(Unit) { vm.refresh() }
+    LaunchedEffect(Unit) {
+        listVm.refresh()
+        // 云端歌单可能有变化（网页端加过），进页面顺手拉一次
+        vm.refreshCloudPlaylists()
+    }
+
+    // 云端歌单：单独一栏，不跟本机歌单混在一起
+    val cloudPlaylists by vm.cloudPlaylists.collectAsState()
+    val cloudVisible = remember(cloudPlaylists, listVm.query) {
+        val q = listVm.query.trim()
+        if (q.isEmpty()) cloudPlaylists
+        else cloudPlaylists.filter { it.name.contains(q, ignoreCase = true) }
+    }
 
     val listState = rememberLazyListState()
     // 头部滑出视野之后，顶栏才顶上标题
@@ -110,7 +133,7 @@ fun PlaylistListScreen(
             }
         )
 
-        if (vm.playlists.isEmpty()) {
+        if (listVm.playlists.isEmpty() && cloudPlaylists.isEmpty()) {
             Column(
                 Modifier
                     .fillMaxSize()
@@ -141,9 +164,9 @@ fun PlaylistListScreen(
                 // 头部：跟着一起滑走，滑走了顶栏顶上「我的歌单」
                 item(key = "header") {
                     PlaylistListHeader(
-                        count = vm.playlists.size,
-                        totalTracks = vm.totalTracks,
-                        totalImported = vm.totalImported,
+                        count = listVm.playlists.size,
+                        totalTracks = listVm.totalTracks,
+                        totalImported = listVm.totalImported,
                         onOpenImport = onOpenImport
                     )
                 }
@@ -156,8 +179,8 @@ fun PlaylistListScreen(
                             .background(MaterialTheme.colorScheme.background)
                     ) {
                         SearchField(
-                            value = vm.query,
-                            onValueChange = { vm.query = it },
+                            value = listVm.query,
+                            onValueChange = { listVm.query = it },
                             placeholder = "找歌单",
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -166,7 +189,7 @@ fun PlaylistListScreen(
                     }
                 }
 
-                if (vm.visiblePlaylists.isEmpty()) {
+                if (listVm.visiblePlaylists.isEmpty()) {
                     item(key = "empty") {
                         Text(
                             "没有匹配的歌单",
@@ -179,17 +202,215 @@ fun PlaylistListScreen(
                         )
                     }
                 } else {
-                    items(vm.visiblePlaylists, key = { it.key }) { p ->
+                    items(listVm.visiblePlaylists, key = { it.key }) { p ->
                         PlaylistCard(
                             playlist = p,
-                            imported = vm.importedCounts[p.key] ?: 0,
-                            coverTrack = vm.coverTracks[p.key],
+                            imported = listVm.importedCounts[p.key] ?: 0,
+                            coverTrack = listVm.coverTracks[p.key],
+                            canUpload = vm.cloudLoggedIn,
                             onClick = { onOpenPlaylist(p.key) },
-                            onDelete = { vm.delete(p.key) }
+                            onDelete = {
+                                // 删本机那张；如果它同步到云端了，云端那份也一起删
+                                listVm.delete(p.key)
+                                // 云端列表也得跟着刷新，别留着一张幽灵卡片
+                                vm.refreshCloudPlaylists()
+                            },
+                            onUpload = { vm.uploadLocalPlaylist(p.key) }
                         )
                     }
                 }
+
+                // 云端歌单：单独一栏，跟本机歌单不混着
+                if (vm.cloudLoggedIn) {
+                    item(key = "cloud-header") {
+                        CloudPlaylistHeader(count = cloudVisible.size)
+                    }
+                    if (cloudVisible.isEmpty()) {
+                        item(key = "cloud-empty") {
+                            Text(
+                                "云端还没有歌单",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    } else {
+                        items(cloudVisible, key = { "cloud-pl-${it.id}" }) { p ->
+                            CloudPlaylistCard(
+                                playlist = p,
+                                onClick = { onOpenCloudPlaylist(p.id) },
+                                onDelete = { vm.deleteCloudPlaylist(p.id) }
+                            )
+                        }
+                    }
+                }
             }
+        }
+    }
+}
+
+/**
+ * 「云端歌单」分区的标题。
+ */
+@Composable
+private fun CloudPlaylistHeader(count: Int) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 16.dp, top = 14.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            Icons.Filled.Cloud,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(15.dp)
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            "云端歌单",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "$count 张 · 与网页版同步",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/**
+ * 一张云端歌单卡片。
+ *
+ * 云端歌单的封面是接口直接给的图（歌单里第一首歌的封面），
+ * 没有就回落到程序化占位画。
+ */
+@Composable
+private fun CloudPlaylistCard(
+    playlist: CloudPlaylistRef,
+    onClick: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 5.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .clickable(onClick = onClick)
+            .padding(10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CloudPlaylistCover(playlist = playlist)
+
+            Spacer(Modifier.width(11.dp))
+
+            Column(Modifier.weight(1f)) {
+                Text(
+                    playlist.name,
+                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 14.sp),
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "${playlist.trackCount} 首 · 云端",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Box {
+                IconButton(
+                    onClick = { menuOpen = true },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.MoreVert,
+                        contentDescription = "更多",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+                AppDropdownMenu(
+                    expanded = menuOpen,
+                    onDismissRequest = { menuOpen = false }
+                ) {
+                    AppMenuItem(text = "打开歌单", icon = Icons.Outlined.KeyboardArrowRight, highlight = true) {
+                        menuOpen = false
+                        onClick()
+                    }
+                    AppMenuItem(text = "删除云端歌单", icon = Icons.Outlined.Delete) {
+                        menuOpen = false
+                        confirmDelete = true
+                    }
+                }
+            }
+        }
+    }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            title = { Text("删除这张云端歌单？") },
+            text = { Text("「${playlist.name}」会从云端删掉，网页版也跟着没了。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    onDelete()
+                }) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text("取消") }
+            }
+        )
+    }
+}
+
+/**
+ * 云端歌单封面：接口给了图就用图，没给就画占位画（不让它裂成一块白）。
+ */
+@Composable
+private fun CloudPlaylistCover(playlist: CloudPlaylistRef) {
+    var bitmap by remember(playlist.cover, playlist.name) { mutableStateOf<ImageBitmap?>(null) }
+    // LocalContext 是 @Composable 的读法，得在协程外面取
+    val app = LocalContext.current.applicationContext as? App
+    LaunchedEffect(playlist.cover, app) {
+        val url = playlist.cover
+        if (url.isBlank() || app == null) {
+            bitmap = null
+            return@LaunchedEffect
+        }
+        bitmap = app.coverRepository.artwork(url)?.asImageBitmap()
+    }
+    Box(
+        Modifier
+            .size(60.dp)
+            .clip(RoundedCornerShape(10.dp))
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap!!,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            GeneratedCover(seed = playlist.name, modifier = Modifier.fillMaxSize())
         }
     }
 }
@@ -255,8 +476,10 @@ private fun PlaylistCard(
     playlist: SavedPlaylist,
     imported: Int,
     coverTrack: Track?,
+    canUpload: Boolean,
     onClick: () -> Unit,
     onDelete: () -> Unit,
+    onUpload: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -349,6 +572,16 @@ private fun PlaylistCard(
                     AppMenuItem(text = "打开歌单", icon = Icons.Outlined.KeyboardArrowRight, highlight = true) {
                         menuOpen = false
                         onClick()
+                    }
+                    if (canUpload) {
+                        AppMenuItem(
+                            text = "上传到云端",
+                            icon = Icons.Outlined.CloudUpload,
+                            subtitle = "网页版也能看到这张单"
+                        ) {
+                            menuOpen = false
+                            onUpload()
+                        }
                     }
                     AppMenuItem(text = "删除歌单", icon = Icons.Outlined.Delete) {
                         menuOpen = false

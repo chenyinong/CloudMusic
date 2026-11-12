@@ -30,6 +30,21 @@ import androidx.compose.ui.unit.sp
 import com.cloudmusic.app.data.Track
 
 /**
+ * 把歌名/歌手里的换行和连续空白压成一行。
+ *
+ * 云端数据（下歌吧那边）偶尔会带 \n，一个换行就能把整行顶成两行 ——
+ * 歌名在上面、歌手被推到很下面，看着就像格式坏了。
+ * 连续空格也一样，一个一个空格会让排版看起来被撑开。
+ */
+private fun oneLine(s: String): String = s
+    .replace('\n', ' ')
+    .replace('\r', ' ')
+    .replace('\u2028', ' ')
+    .replace('\u2029', ' ')
+    .replace(Regex("[\\t\\u00A0\\u200B\\u200E\\u200F ]+"), " ")
+    .trim()
+
+/**
  * 通用歌曲行，两种形态：
  * - 默认（网易云）：方形小封面 + 歌名 + 灰色歌手 + 细分隔线；
  * - 传了 [index]（QQ 收藏列表）：左边是**序号**不是封面，歌手后面跟灰色小胶囊，
@@ -114,10 +129,11 @@ fun SongRow(
             Spacer(Modifier.width(if (index != null) 8.dp else if (showCover) 14.dp else 2.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    title.ifBlank { "未知歌曲" },
+                    oneLine(title).ifBlank { "未知歌曲" },
                     style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
+                    softWrap = false,
                     overflow = TextOverflow.Ellipsis,
                     color = if (playing) {
                         MaterialTheme.colorScheme.primary
@@ -130,10 +146,12 @@ fun SongRow(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (subtitle.isNotBlank()) {
                             Text(
-                                subtitle,
+                                oneLine(subtitle),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f, fill = false),
                                 maxLines = 1,
+                                softWrap = false,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
@@ -141,17 +159,20 @@ fun SongRow(
                             Spacer(Modifier.width(6.dp))
                             // 纯文字淡灰，和副标题同字号同色，不再用胶囊底
                             Text(
-                                badge,
+                                oneLine(badge),
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.Normal,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
                 }
                 if (note.isNotBlank()) {
                     Text(
-                        note,
+                        oneLine(note),
                         style = MaterialTheme.typography.bodySmall,
                         color = noteColor ?: MaterialTheme.colorScheme.error,
                         maxLines = 2,

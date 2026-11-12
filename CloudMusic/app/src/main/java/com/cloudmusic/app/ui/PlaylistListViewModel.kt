@@ -96,11 +96,24 @@ class PlaylistListViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 删掉一张歌单。网盘里已经导进去的歌不动。 */
+    /**
+     * 删一张本机歌单。
+     *
+     * 已经同步到云端的那张，云端也一起删 —— 两边是同一张单，
+     * 只删一半的话，「云端歌单」分组里还杵着一张，用户看着就像没删掉。
+     */
     fun delete(key: String) {
         viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) { store.playlist(key) }
+            val cloudId = saved?.cloudId ?: 0L
+            if (cloudId > 0 && appRef.prefs.cloudLoggedIn) {
+                // 云端删不掉也别拦着删本机的 —— 本机这份才是用户自己的
+                runCatching { appRef.cloudSync.deletePlaylist(cloudId) }
+            }
             withContext(Dispatchers.IO) { store.delete(key) }
             refresh()
-            message = "歌单已删除，网盘里的歌还在"
+            message = if (cloudId > 0) "歌单已删除（本机和云端都删了），网盘里的歌还在"
+            else "歌单已删除，网盘里的歌还在"
         }
     }
 }

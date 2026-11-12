@@ -22,6 +22,10 @@ import com.cloudmusic.app.data.LyricsCandidate
 import com.cloudmusic.app.data.ProviderKind
 import com.cloudmusic.app.data.Track
 import com.cloudmusic.app.data.WebDavException
+import com.cloudmusic.app.data.cloud.CLOUD_TRACK_PREFIX
+import com.cloudmusic.app.data.cloud.CloudPlaylistRef
+import com.cloudmusic.app.data.cloud.CloudResolver
+import com.cloudmusic.app.data.cloud.CloudTrack
 import com.cloudmusic.app.data.onedrive.DeviceCodeInfo
 import com.cloudmusic.app.data.onedrive.DriveQuota
 import com.cloudmusic.app.data.onedrive.OneDriveAuth
@@ -41,7 +45,7 @@ import java.net.UnknownHostException
 
 enum class Screen {
     LOGIN, LIBRARY, PLAYER, SETTINGS, IMPORT, PLAYLIST_IMPORT, PLAYLIST_LIST, PLAYLIST_DETAIL,
-    QUARK_LOGIN, QUARK_DIAG
+    QUARK_LOGIN, QUARK_DIAG, CLOUD_LOGIN, CLOUD_PLAYLIST_DETAIL
 }
 
 /** 夸克登录态实时校验的进度。 */
@@ -87,6 +91,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 当前打开的歌单（歌单详情页用）。 */
     var playlistKey by mutableStateOf("")
+
+    /** 当前打开的云端歌单 id（云端歌单详情页用）。 */
+    var cloudPlaylistId by mutableStateOf(0L)
+
+    /** 云端登录页返回时回哪一页（从「我的」页进的回我的，从设置进的回设置）。 */
+    var cloudLoginReturn by mutableStateOf(Screen.SETTINGS)
 
     /** 曲库筛选：null = 全部网盘 */
     var providerFilter by mutableStateOf<String?>(null)
@@ -458,6 +468,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 quarkAccount = name
             }
         }
+        // 扫码换来的新 cookie，顺手同步到云端 —— 网页版会自动取用，
+        // 换设备时就不用再扫一遍了。
+        if (prefs.cloudLoggedIn) {
+            val cookie = prefs.quarkCookie
+            viewModelScope.launch {
+                runCatching { appRef.cloudSync.pushQuarkCookie(cookie) }
+            }
+        }
     }
 
     fun clearQuark() {
@@ -473,6 +491,350 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         @Suppress("DEPRECATION")
         cm.removeAllCookies(android.webkit.ValueCallback<Boolean> { })
         cm.flush()
+    }
+
+    // ---------------- 云端账号（网页版云音乐，Cloudflare Workers） ----------------
+
+    /** 云端服务器地址。设置页里改。 */
+    var cloudServer by mutableStateOf(prefs.cloudServerUrl)
+        private set
+
+    var cloudLoggedIn by mutableStateOf(prefs.cloudLoggedIn)
+        private set
+
+    var cloudUser by mutableStateOf(prefs.cloudUser)
+        private set
+
+    /** 云端操作进行中（登录 / 同步 / 上传）。 */
+    var cloudBusy by mutableStateOf(false)
+        private set
+
+    /** 云端相关的状态提示，成功和失败都挂这儿。 */
+    var cloudMessage by mutableStateOf("")
+        private set
+
+    /**
+     * 云端操作的反馈。
+     *
+     * 除了设置页，曲库页的提示行也显示一下 —— 用户在「我的」页点收藏时
+     * 不会待在设置页，光写在这儿等于没反馈。
+     */
+    private fun cloudSay(msg: String) {
+        cloudMessage = msg
+        _status.value = msg
+    }
+
+    private val _cloudFavorites = MutableStateFlow<List<CloudTrack>>(emptyList())
+    val cloudFavorites = _cloudFavorites.asStateFlow()
+
+    /** 已经收藏的 key（判断网盘歌曲那颗心亮不亮）。 */
+    private val _cloudFavoriteKeys = MutableStateFlow<Set<String>>(emptySet())
+    val cloudFavoriteKeys = _cloudFavoriteKeys.asStateFlow()
+
+    private val _cloudPlaylists = MutableStateFlow<List<CloudPlaylistRef>>(emptyList())
+    val cloudPlaylists = _cloudPlaylists.asStateFlow()
+
+    /** 云端歌曲的在线混播（我的页、云端歌单详情页共用，挂在 App 上）。 */
+    val cloudPlayback: CloudPlaybackController get() = appRef.cloudPlayback
+
+    /** 把本地缓存的云端内容读进界面。 */
+    private fun refreshCloudCache() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val favs = appRef.cloudStore.favorites()
+            _cloudFavorites.value = favs
+            _cloudFavoriteKeys.value = favs.map { it.key }.toSet()
+            _cloudPlaylists.value = appRef.cloudStore.playlists()
+        }
+    }
+
+    /**
+     * 登录云端账号。
+     *
+     * 登录成功立刻拉一次全量：收藏、歌单都同步下来，
+     * 顺便看看云端有没有存夸克 Cookie（本机没登录的话直接恢复）。
+     */
+    fun cloudLogin(server: String, username: String, password: String) {
+        if (cloudBusy) return
+        cloudBusy = true
+        _error.value = null
+        cloudMessage = "正在连接云端…"
+        viewModelScope.launch {
+            try {
+                prefs.cloudServerUrl = server
+                val res = appRef.cloudClient.login(username, password)
+                prefs.saveCloudLogin(res.token, res.username)
+                cloudLoggedIn = true
+                cloudUser = res.username
+                cloudServer = prefs.cloudServerUrl
+                val sync = appRef.cloudSync.syncAll()
+                if (sync.quarkRestored) {
+                    quarkLoggedIn = prefs.quarkLoggedIn
+                    quarkAccount = prefs.quarkAccount
+                }
+                refreshCloudCache()
+                cloudSay(sync.message.ifBlank { "已登录：${res.username}" })
+                // 登录完直接落在云端这一档，别让人再点一次胶囊
+                providerFilter = FILTER_CLOUD
+                screen = Screen.LIBRARY
+            } catch (e: Exception) {
+                _error.value = e.message ?: "云端登录失败"
+                cloudMessage = ""
+            } finally {
+                cloudBusy = false
+            }
+        }
+    }
+
+    /** 退出云端账号。本地缓存也清掉，免得看到别人的歌。 */
+    fun cloudLogout() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { appRef.cloudStore.clearAll() }
+            prefs.clearCloudLogin()
+            cloudLoggedIn = false
+            cloudUser = ""
+            // 退登了还停在「云端」这一档就只剩一片空白，退回全部
+            if (providerFilter == FILTER_CLOUD) providerFilter = null
+            cloudSay("已退出云端账号")
+            refreshCloudCache()
+        }
+    }
+
+    /** 去登录云端账号（「我的」页的云端胶囊、设置页都走这儿）。 */
+    fun openCloudLogin() {
+        cloudLoginReturn = Screen.LIBRARY
+        screen = Screen.CLOUD_LOGIN
+    }
+
+    /**
+     * 只拉一次云端收藏（进「我的」页时调）。
+     *
+     * 比全量同步轻 —— 歌单不动，只更新收藏。
+     */
+    fun refreshCloudFavorites() {
+        if (!prefs.cloudLoggedIn) return
+        viewModelScope.launch {
+            runCatching { appRef.cloudSync.pullFavorites() }
+                .onSuccess { refreshCloudCache() }
+        }
+    }
+
+    /** 只拉一次云端歌单列表（进「歌单」页时调）。 */
+    fun refreshCloudPlaylists() {
+        if (!prefs.cloudLoggedIn) return
+        viewModelScope.launch {
+            runCatching { appRef.cloudSync.pullPlaylists() }
+                .onSuccess { refreshCloudCache() }
+        }
+    }
+
+    /** 手动同步一次。 */
+    fun cloudSyncNow() {        if (cloudBusy) return
+        if (!prefs.cloudLoggedIn) {
+            _error.value = "还没登录云端账号"
+            return
+        }
+        cloudBusy = true
+        cloudMessage = "正在同步…"
+        viewModelScope.launch {
+            try {
+                val sync = appRef.cloudSync.syncAll()
+                if (sync.quarkRestored) {
+                    quarkLoggedIn = prefs.quarkLoggedIn
+                    quarkAccount = prefs.quarkAccount
+                }
+                refreshCloudCache()
+                cloudSay(sync.message)
+            } catch (e: Exception) {
+                _error.value = e.message ?: "同步失败"
+                cloudMessage = ""
+            } finally {
+                cloudBusy = false
+            }
+        }
+    }
+
+    /**
+     * 一首歌在云端收藏里的 key。
+     *
+     * 网盘歌曲用曲库 key（就是「网盘类型 + 网盘内 id」，天然不会跟网页版的
+     * `netease:123` / `quark:xxx` 撞上）；云端歌曲多一层 `cloud:` 前缀，
+     * 去掉前缀才是它在云端的收藏 key。
+     */
+    private fun cloudKeyOf(track: Track): String =
+        if (track.key.startsWith(CLOUD_TRACK_PREFIX)) track.key.removePrefix(CLOUD_TRACK_PREFIX)
+        else track.key
+
+    /** 网盘歌曲 → 云端收藏条目。 */
+    private fun cloudTrackOf(track: Track): CloudTrack = CloudTrack(
+        key = cloudKeyOf(track),
+        title = track.title,
+        artist = track.artist,
+        album = track.album,
+        durationSec = track.durationSec.toInt(),
+        platform = track.provider,
+        platformId = "",
+        coverUrl = "",
+        quarkId = "",
+    )
+
+    /** 这首歌是不是已经收藏到云端了。 */
+    fun isCloudFavorite(track: Track): Boolean = cloudKeyOf(track) in _cloudFavoriteKeys.value
+
+    /**
+     * 收藏 / 取消收藏一首歌（同步到云端）。
+     *
+     * 网盘歌曲和云端歌曲都走这儿 —— 云端歌曲的原始条目还在本地缓存里，
+     * 重新收藏时用原来那份，别把 platform / platformId 弄丢了。
+     */
+    fun toggleCloudFavorite(track: Track) {
+        if (!prefs.cloudLoggedIn) {
+            _error.value = "还没登录云端账号，点「我的」页的云端胶囊登录一下"
+            return
+        }
+        val key = cloudKeyOf(track)
+        val already = key in _cloudFavoriteKeys.value
+        viewModelScope.launch {
+            try {
+                if (already) {
+                    appRef.cloudSync.removeFavorite(key)
+                    cloudSay("已取消收藏《${track.title}》")
+                } else {
+                    val original = _cloudFavorites.value.firstOrNull { it.key == key }
+                    appRef.cloudSync.pushFavorite(original ?: cloudTrackOf(track))
+                    cloudSay("已收藏《${track.title}》，网页版同步可见")
+                }
+                refreshCloudCache()
+            } catch (e: Exception) {
+                _error.value = e.message ?: "操作失败"
+            }
+        }
+    }
+
+    /** 取消收藏一首云端收藏。 */
+    fun removeCloudFavorite(t: CloudTrack) {
+        viewModelScope.launch {
+            try {
+                appRef.cloudSync.removeFavorite(t.key)
+                cloudSay("已取消收藏《${t.title}》")
+                refreshCloudCache()
+            } catch (e: Exception) {
+                _error.value = e.message ?: "操作失败"
+            }
+        }
+    }
+
+    /**
+     * 播一首云端收藏。
+     *
+     * 直链是本机解析出来的（复用歌单那套音源），不依赖云端在线。
+     */
+    /** 播放一整队云端歌（从第一首开始）。 */
+    fun playCloudQueue(queue: List<CloudTrack>) {
+        if (queue.isEmpty()) return
+        playCloudTrack(queue.first(), queue)
+    }
+
+    fun playCloudTrack(t: CloudTrack, queue: List<CloudTrack>) {
+        val items = if (queue.isEmpty()) listOf(t) else queue
+        val idx = items.indexOfFirst { it.key == t.key }.coerceAtLeast(0)
+        viewModelScope.launch {
+            _status.value = "正在找《${t.title}》的可播直链…"
+            val err = cloudPlayback.play(items, idx)
+            _status.value = ""
+            if (err != null) _error.value = err
+        }
+    }
+
+    /**
+     * 把本机的一张歌单传到云端。
+     *
+     * 曲目字段跟网页版的 Track 是同一套，两端能对着看。
+     */
+    fun uploadLocalPlaylist(playlistKey: String) {
+        if (!prefs.cloudLoggedIn) {
+            _error.value = "还没登录云端账号，去设置里登录一下"
+            return
+        }
+        if (cloudBusy) return
+        cloudBusy = true
+        viewModelScope.launch {
+            try {
+                val saved = withContext(Dispatchers.IO) { appRef.playlistStore.playlist(playlistKey) }
+                if (saved == null) {
+                    _error.value = "找不到这张歌单"
+                    return@launch
+                }
+                val tracks = withContext(Dispatchers.IO) { appRef.playlistStore.tracks(playlistKey) }
+                val cloudTracks = appRef.cloudSync.toCloudTracks(saved, tracks)
+                val cloudId = appRef.cloudSync.pushPlaylist(
+                    name = saved.name,
+                    platform = appRef.cloudSync.cloudPlatformOf(saved.platform),
+                    tracks = cloudTracks,
+                )
+                // 记下两边的对应关系 —— 以后删哪边，另一边跟着删
+                withContext(Dispatchers.IO) { appRef.playlistStore.setCloudId(playlistKey, cloudId) }
+                refreshCloudCache()
+                cloudSay("《${saved.name}》已上传到云端（${cloudTracks.size} 首）")
+            } catch (e: Exception) {
+                _error.value = e.message ?: "上传失败"
+            } finally {
+                cloudBusy = false
+            }
+        }
+    }
+
+    /** 删掉一张云端歌单。 */
+    fun deleteCloudPlaylist(id: Long) {
+        viewModelScope.launch {
+            try {
+                appRef.cloudSync.deletePlaylist(id)
+                // 删完再以云端为准拉一次。
+                //
+                // 只清本地缓存是不够的 —— 进页面时那次「拉歌单列表」可能还在路上，
+                // 它要是晚一步到，就会把刚删掉的歌单又写回本地，看着就像没删掉。
+                runCatching { appRef.cloudSync.pullPlaylists() }
+                // 本机那张如果是同一张（上传上去的），也一起删 ——
+                // 不然「歌单」页还杵着一张，用户看着就像没删掉。
+                val local = withContext(Dispatchers.IO) { appRef.playlistStore.playlistByCloudId(id) }
+                if (local != null) {
+                    withContext(Dispatchers.IO) { appRef.playlistStore.delete(local.key) }
+                }
+                refreshCloudCache()
+                cloudSay("云端歌单已删除")
+            } catch (e: Exception) {
+                _error.value = e.message ?: "删除失败"
+            }
+        }
+    }
+
+    /** 本机歌单列表有变动时 +1，歌单页监听它来刷新。 */
+    var playlistListVersion by mutableStateOf(0)
+        private set
+
+    /** 本机歌单删了或者改了，通知一下歌单页。 */
+    fun playlistListChanged() {
+        playlistListVersion++
+    }
+
+
+    /** 把本机的夸克 Cookie 传到云端（网页版会自动取到，换设备免扫码）。 */
+    fun pushQuarkToCloud() {
+        if (!prefs.cloudLoggedIn) {
+            _error.value = "还没登录云端账号"
+            return
+        }
+        if (!prefs.quarkLoggedIn) {
+            _error.value = "本机还没登录夸克，登录后才会同步"
+            return
+        }
+        viewModelScope.launch {
+            try {
+                appRef.cloudSync.pushQuarkCookie(prefs.quarkCookie)
+                cloudSay("夸克登录态已同步到云端，网页版会自动取用")
+            } catch (e: Exception) {
+                _error.value = e.message ?: "同步失败"
+            }
+        }
     }
 
     fun changeOneDriveScopeMode(mode: String) {
@@ -680,6 +1042,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // 空间配额：设置页要显示「还剩多少空间」，启动后顺手拉一次
         if (prefs.oneDriveConnected) refreshOneDriveQuota()
         if (prefs.hasCredentials) refreshDavQuota()
+
+        // 云端账号：先把本地缓存显示出来，再后台静默同步一次
+        if (prefs.cloudLoggedIn) {
+            refreshCloudCache()
+            viewModelScope.launch {
+                runCatching { appRef.cloudSync.syncAll() }
+                    .onSuccess { sync ->
+                        if (sync.quarkRestored) {
+                            quarkLoggedIn = prefs.quarkLoggedIn
+                            quarkAccount = prefs.quarkAccount
+                        }
+                        refreshCloudCache()
+                    }
+            }
+        }
     }
 
     /**

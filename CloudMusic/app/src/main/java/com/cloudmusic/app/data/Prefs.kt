@@ -54,6 +54,9 @@ class Prefs(context: Context) {
         private const val KEY_DAV_ROOT_WRITABLE = "dav_root_writable"
         private const val KEY_THEME_FOLLOW = "theme_follow_system"
         private const val KEY_TAGS_FIX_V1 = "tags_fix_v1"
+        private const val KEY_CLOUD_SERVER = "cloud_server_url"
+        private const val KEY_CLOUD_TOKEN = "cloud_token"
+        private const val KEY_CLOUD_USER = "cloud_user"
     }
 
     private val appContext = context.applicationContext
@@ -375,6 +378,45 @@ class Prefs(context: Context) {
             .remove(KEY_OD_ACCOUNT)
             .remove(KEY_OD_AUTHORITY)
             .remove(KEY_OD_SCOPE)
+            .apply()
+    }
+
+    // ---------------- 云端账号（网页版云音乐，Cloudflare Workers） ----------------
+
+    /**
+     * 云端服务器地址。
+     *
+     * 默认留空 —— Workers 的域名是部署时定的，用户得自己填。
+     * 存的时候统一去掉结尾的斜杠，省得拼出 `//api/me` 这种地址。
+     */
+    var cloudServerUrl: String
+        get() = sp.getString(KEY_CLOUD_SERVER, "")?.trim()?.trimEnd('/').orEmpty()
+        set(v) = sp.edit().putString(KEY_CLOUD_SERVER, v.trim().trimEnd('/')).apply()
+
+    /** 登录令牌。空串 = 没登录。 */
+    var cloudToken: String
+        get() = sp.getString(KEY_CLOUD_TOKEN, "")?.trim().orEmpty()
+        set(v) = sp.edit().putString(KEY_CLOUD_TOKEN, v.trim()).apply()
+
+    /** 登录的账号名，界面上显示用。 */
+    var cloudUser: String
+        get() = sp.getString(KEY_CLOUD_USER, "")?.trim().orEmpty()
+        set(v) = sp.edit().putString(KEY_CLOUD_USER, v.trim()).apply()
+
+    val cloudLoggedIn: Boolean
+        get() = cloudToken.isNotBlank() && cloudServerUrl.isNotBlank()
+
+    fun saveCloudLogin(token: String, username: String) {
+        sp.edit()
+            .putString(KEY_CLOUD_TOKEN, token.trim())
+            .putString(KEY_CLOUD_USER, username.trim())
+            .apply()
+    }
+
+    fun clearCloudLogin() {
+        sp.edit()
+            .remove(KEY_CLOUD_TOKEN)
+            .remove(KEY_CLOUD_USER)
             .apply()
     }
 }

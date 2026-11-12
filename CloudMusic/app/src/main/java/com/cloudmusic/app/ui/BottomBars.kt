@@ -403,8 +403,8 @@ val BOTTOM_TABS = listOf(
  * 不然在「歌单详情」里底部一排图标全都不亮，看着像没选中任何东西。
  */
 fun tabOf(screen: Screen): Screen = when (screen) {
-    Screen.PLAYLIST_DETAIL, Screen.PLAYLIST_IMPORT -> Screen.PLAYLIST_LIST
-    Screen.QUARK_LOGIN, Screen.QUARK_DIAG -> Screen.SETTINGS
+    Screen.PLAYLIST_DETAIL, Screen.PLAYLIST_IMPORT, Screen.CLOUD_PLAYLIST_DETAIL -> Screen.PLAYLIST_LIST
+    Screen.QUARK_LOGIN, Screen.QUARK_DIAG, Screen.CLOUD_LOGIN -> Screen.SETTINGS
     else -> screen
 }
 

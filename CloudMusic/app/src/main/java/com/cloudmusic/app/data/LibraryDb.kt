@@ -41,7 +41,13 @@ class LibraryDb(context: Context) :
         /** 歌单里的每一首歌 */
         const val TABLE_PLAYLIST_TRACKS = "playlist_tracks"
 
-        const val VERSION = 9
+        /** 云端（网页版云音乐）同步下来的收藏 */
+        const val TABLE_CLOUD_FAVORITES = "cloud_favorites"
+
+        /** 云端同步下来的歌单（清单 + 曲目 JSON） */
+        const val TABLE_CLOUD_PLAYLISTS = "cloud_playlists"
+
+        const val VERSION = 11
 
         fun lyricKey(providerId: String, folder: String, base: String): String =
             "$providerId|${folder.lowercase()}|${base.lowercase()}"
@@ -71,6 +77,7 @@ class LibraryDb(context: Context) :
         createCoverTable(db)
         createCoverFilesTable(db)
         createLyricOffsetTable(db)
+        createCloudTables(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -120,6 +127,50 @@ class LibraryDb(context: Context) :
         if (oldVersion < 7) createCoverTable(db)
         if (oldVersion < 8) createCoverFilesTable(db)
         if (oldVersion < 9) createLyricOffsetTable(db)
+        if (oldVersion < 10) createCloudTables(db)
+        if (oldVersion < 11) {
+            // 本机歌单记下它对应的那张云端歌单 id。
+            // 没有这个关联的话，删一边另一边还在 —— 用户看着就像没删掉。
+            db.execSQL("ALTER TABLE $TABLE_PLAYLISTS ADD COLUMN cloudId INTEGER NOT NULL DEFAULT 0")
+        }
+    }
+
+    /**
+     * 云端缓存：网页版云音乐同步下来的收藏和歌单。
+     *
+     * 单独两张表，不跟本机的 tracks / playlists 混在一起 ——
+     * 云端的歌没有本地文件，混进曲库会让人以为点得进就播得出。
+     */
+    private fun createCloudTables(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS $TABLE_CLOUD_FAVORITES (
+                key TEXT PRIMARY KEY,
+                title TEXT NOT NULL DEFAULT '',
+                artist TEXT NOT NULL DEFAULT '',
+                album TEXT NOT NULL DEFAULT '',
+                durationSec INTEGER NOT NULL DEFAULT 0,
+                platform TEXT NOT NULL DEFAULT '',
+                platformId TEXT NOT NULL DEFAULT '',
+                coverUrl TEXT NOT NULL DEFAULT '',
+                quarkId TEXT NOT NULL DEFAULT '',
+                updatedAt INTEGER NOT NULL DEFAULT 0
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS $TABLE_CLOUD_PLAYLISTS (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL DEFAULT '',
+                platform TEXT NOT NULL DEFAULT '',
+                updatedAt INTEGER NOT NULL DEFAULT 0,
+                trackCount INTEGER NOT NULL DEFAULT 0,
+                cover TEXT NOT NULL DEFAULT '',
+                tracksJson TEXT NOT NULL DEFAULT '[]'
+            )
+            """.trimIndent()
+        )
     }
 
     /**
@@ -140,7 +191,8 @@ class LibraryDb(context: Context) :
                 trackCount INTEGER NOT NULL DEFAULT 0,
                 sourceUrl TEXT NOT NULL DEFAULT '',
                 createdAt INTEGER NOT NULL DEFAULT 0,
-                updatedAt INTEGER NOT NULL DEFAULT 0
+                updatedAt INTEGER NOT NULL DEFAULT 0,
+                cloudId INTEGER NOT NULL DEFAULT 0
             )
             """.trimIndent()
         )

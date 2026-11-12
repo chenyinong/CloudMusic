@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MusicNote
@@ -171,9 +172,75 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit) {
                 }
             }
 
+            // ── 云同步：跟网页版云音乐共用账号 ────────────────
+            SettingsCard(
+                label = "云同步",
+                icon = Icons.Filled.CloudSync,
+                trailing = if (vm.cloudLoggedIn) "已登录" else "未登录"
+            ) {
+                if (!vm.cloudLoggedIn) {
+                    Text(
+                        "登录网页版云音乐的账号，「我的」页的收藏和「歌单」页的歌单就会两边同步；" +
+                            "夸克登录态也能存到云端，换设备免扫码。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SmallButton("登录云端账号", Accent) {
+                            vm.cloudLoginReturn = Screen.SETTINGS
+                            vm.screen = Screen.CLOUD_LOGIN
+                        }
+                    }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        BrandIcon(Icons.Filled.CloudSync, Color(0xFF2F7BE5))
+                        Spacer(Modifier.width(11.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                vm.cloudUser.ifBlank { "已登录" },
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                vm.cloudServer,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        StatusBadge("已连接")
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SmallButton("立即同步", Accent) { vm.cloudSyncNow() }
+                        SmallButton("上传夸克登录态", MaterialTheme.colorScheme.onSurfaceVariant) {
+                            vm.pushQuarkToCloud()
+                        }
+                        SmallButton("退出登录", MaterialTheme.colorScheme.error) {
+                            vm.cloudLogout()
+                        }
+                    }
+                    if (vm.cloudMessage.isNotBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            vm.cloudMessage,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "云端只存「歌是哪首」，直链还在本机解析 —— 断网也能听已经同步下来的歌。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
             // ── 外观与歌词 ─────────────────────────────────
-            SettingsCard("外观与歌词", Icons.Filled.Palette) {
-                SwitchRow(
+            SettingsCard("外观与歌词", Icons.Filled.Palette) {                SwitchRow(
                     title = "跟随系统深色模式",
                     subtitle = "跟随系统切换明暗主题",
                     checked = vm.themeFollowSystem,

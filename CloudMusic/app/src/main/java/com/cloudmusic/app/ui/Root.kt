@@ -1,6 +1,7 @@
 package com.cloudmusic.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -8,8 +9,10 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.activity.compose.BackHandler
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -21,11 +24,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cloudmusic.app.data.ProviderKind
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.haze
+import kotlinx.coroutines.delay
 
 /**
  * 列表页底部要预留的滚动余量（迷你条 + 页签栏的高度）。
@@ -114,6 +119,8 @@ fun CloudMusicRoot(vm: AppViewModel) {
             Screen.SETTINGS -> vm.screen = Screen.LIBRARY
             Screen.QUARK_LOGIN -> vm.screen = Screen.SETTINGS
             Screen.QUARK_DIAG -> vm.screen = Screen.SETTINGS
+            Screen.CLOUD_LOGIN -> vm.cloudLoginReturn
+            Screen.CLOUD_PLAYLIST_DETAIL -> vm.screen = Screen.PLAYLIST_LIST
             else -> {}
         }
     }
@@ -234,11 +241,16 @@ fun CloudMusicRoot(vm: AppViewModel) {
 
         // 我的歌单：网易云那种列表，点进去才是歌单详情
         Screen.PLAYLIST_LIST -> PlaylistListScreen(
+            vm = vm,
             onBack = { vm.screen = Screen.LIBRARY },
             onOpenImport = { vm.importReturnScreen = Screen.PLAYLIST_LIST; vm.screen = Screen.PLAYLIST_IMPORT },
             onOpenPlaylist = { key ->
                 vm.playlistKey = key
                 vm.screen = Screen.PLAYLIST_DETAIL
+            },
+            onOpenCloudPlaylist = { id ->
+                vm.cloudPlaylistId = id
+                vm.screen = Screen.CLOUD_PLAYLIST_DETAIL
             }
         )
 
@@ -278,8 +290,56 @@ fun CloudMusicRoot(vm: AppViewModel) {
                 onOpenLogin = { vm.screen = Screen.QUARK_LOGIN }
             )
         }
+
+        // 云端账号登录（跟网页版云音乐共用）
+        Screen.CLOUD_LOGIN -> CloudLoginScreen(
+            serverDefault = vm.cloudServer,
+            usernameDefault = vm.cloudUser,
+            busy = vm.cloudBusy,
+            error = error,
+            canGoBack = true,
+            onBack = { vm.screen = vm.cloudLoginReturn },
+            onLogin = { server, username, password ->
+                vm.cloudLogin(server, username, password)
+            }
+        )
+
+        // 云端歌单详情
+        Screen.CLOUD_PLAYLIST_DETAIL -> CloudPlaylistDetailScreen(
+            playlistId = vm.cloudPlaylistId,
+            onBack = { vm.screen = Screen.PLAYLIST_LIST }
+        )
         }
     }
+    }
+
+    // 全局错误提示。
+    //
+    // AppViewModel 里的错误原来只有登录页会显示，其它页面（比如云端同步失败）
+    // 出了错用户一点反应都看不到。这里统一兜住：顶部挂一条，几秒后自动收掉。
+    LaunchedEffect(error) {
+        if (error != null) {
+            delay(5000)
+            vm.dismissError()
+        }
+    }
+
+    if (error != null) {
+        Box(
+            Modifier
+                .align(Alignment.TopCenter)
+                .padding(horizontal = 16.dp, vertical = 14.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.errorContainer)
+                .clickable { vm.dismissError() }
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+        ) {
+            Text(
+                error!!,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+        }
     }
 
         // ── 底部：正在播放的悬浮条 + 导航栏 ──────────────

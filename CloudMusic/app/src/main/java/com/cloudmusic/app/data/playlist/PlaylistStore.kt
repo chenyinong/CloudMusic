@@ -14,6 +14,13 @@ data class SavedPlaylist(
     val sourceUrl: String,
     val createdAt: Long,
     val updatedAt: Long,
+    /**
+     * 它对应的那张云端歌单 id（上传到云端之后才有）。
+     *
+     * 记这个是为了删得干净 —— 本机和云端是两条记录，
+     * 删一边另一边还在的话，用户看着就像没删掉。
+     */
+    val cloudId: Long = 0L,
 )
 
 /** 歌单里的一首歌，连同它自己的导入状态。 */
@@ -86,6 +93,8 @@ class PlaylistStore(private val db: LibraryDb) {
         for (t in tracks(key)) {
             if (t.trackKey.isNotBlank()) oldStates[t.trackKey] = t.state to t.note
         }
+        // 已经同步到云端的那张，重拉清单别把关联弄丢了
+        val oldCloudId = playlist(key)?.cloudId ?: 0L
 
         val writable = db.writableDatabase
         writable.beginTransaction()
@@ -100,6 +109,7 @@ class PlaylistStore(private val db: LibraryDb) {
                 put("sourceUrl", sourceUrl)
                 put("createdAt", now)
                 put("updatedAt", now)
+                put("cloudId", oldCloudId)
             }
             writable.insertWithOnConflict(
                 LibraryDb.TABLE_PLAYLISTS, null, cv, android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE
@@ -145,7 +155,7 @@ class PlaylistStore(private val db: LibraryDb) {
         val out = mutableListOf<SavedPlaylist>()
         db.readableDatabase.rawQuery(
             "SELECT key, platform, playlistId, name, creator, trackCount, sourceUrl, " +
-                "createdAt, updatedAt FROM ${LibraryDb.TABLE_PLAYLISTS} ORDER BY updatedAt DESC",
+                "createdAt, updatedAt, cloudId FROM ${LibraryDb.TABLE_PLAYLISTS} ORDER BY updatedAt DESC",
             null
         ).use { c ->
             while (c.moveToNext()) {
@@ -160,6 +170,7 @@ class PlaylistStore(private val db: LibraryDb) {
                         sourceUrl = c.getString(6) ?: "",
                         createdAt = c.getLong(7),
                         updatedAt = c.getLong(8),
+                        cloudId = c.getLong(9),
                     )
                 )
             }
@@ -168,6 +179,17 @@ class PlaylistStore(private val db: LibraryDb) {
     }
 
     fun playlist(key: String): SavedPlaylist? = playlists().firstOrNull { it.key == key }
+
+    /** 记下这张本机歌单对应的云端歌单 id。 */
+    fun setCloudId(key: String, cloudId: Long) {
+        if (cloudId <= 0) return
+        val cv = ContentValues().apply { put("cloudId", cloudId) }
+        db.writableDatabase.update(LibraryDb.TABLE_PLAYLISTS, cv, "key = ?", arrayOf(key))
+    }
+
+    /** 找出对应某个云端歌单的本机歌单（没有就 null）。 */
+    fun playlistByCloudId(cloudId: Long): SavedPlaylist? =
+        if (cloudId <= 0) null else playlists().firstOrNull { it.cloudId == cloudId }
 
     /** 歌单里的歌，按原来的顺序。 */
     fun tracks(playlistKey: String): List<SavedTrack> {
