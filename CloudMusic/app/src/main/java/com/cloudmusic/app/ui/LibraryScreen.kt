@@ -202,18 +202,34 @@ fun LibraryScreen(
                 )
             }
 
+            // 搜索栏 + 过滤胶囊：放在同一个吸顶块里，
+            // 胶囊永远停在搜索栏下面，列表往下滑也能随时换筛选
             stickyHeader(key = "search") {
-                Box(
+                Column(
                     Modifier
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.background)
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
                     SearchField(
                         value = query,
                         onValueChange = onQueryChange,
                         placeholder = "搜索歌曲 / 歌手 / 专辑",
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                    ProviderFilterChips(
+                        providers = providers,
+                        providerFilter = providerFilter,
+                        onProviderFilterChange = onProviderFilterChange,
+                        cloudSelected = cloudOnly,
+                        onCloudClick = {
+                            if (vm.cloudLoggedIn) {
+                                onProviderFilterChange(if (cloudOnly) null else FILTER_CLOUD)
+                            } else {
+                                vm.openCloudLogin()
+                            }
+                        }
                     )
                 }
             }
@@ -286,61 +302,7 @@ fun LibraryScreen(
                 }
             }
 
-            // 按网盘 / 按云端筛选（轻量小胶囊，不要 FilterChip 那种粗边框）
-            // 云端收藏占一档，跟网盘胶囊排在同一行
-            // 和上面「播放全部」拉开一点，两行控件别挤成一坨
-            Spacer(Modifier.height(8.dp))
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                val options = listOf<Pair<String?, String>>(null to "全部") +
-                    providers.map { it.id to it.shortLabel }
-                options.forEach { (id, label) ->
-                    val selected = providerFilter == id
-                    Text(
-                        label,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                        color = if (selected) MaterialTheme.colorScheme.onPrimary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(9.dp))
-                            .background(
-                                if (selected) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.surfaceVariant
-                            )
-                            .clickable { onProviderFilterChange(id) }
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                    )
-                }
-                // 云端胶囊：跟网盘并排。没登录时点它去登录页
-                val selected = cloudOnly
-                Text(
-                    "云端",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                    color = if (selected) MaterialTheme.colorScheme.onPrimary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(
-                            if (selected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.surfaceVariant
-                        )
-                        .clickable {
-                            if (vm.cloudLoggedIn) {
-                                onProviderFilterChange(if (selected) null else FILTER_CLOUD)
-                            } else {
-                                vm.openCloudLogin()
-                            }
-                        }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                )
-            }
-
+            // 过滤胶囊挪到上面的吸顶块里了，这里只留「播放全部 + 排序」
             if (status.isNotBlank()) {
                 Row(
                     Modifier
@@ -487,6 +449,69 @@ fun LibraryScreen(
             dismissButton = {
                 TextButton(onClick = { pendingDelete = null }) { Text("取消") }
             }
+        )
+    }
+}
+
+/**
+ * 按网盘 / 按云端筛选的小胶囊。
+ *
+ * 轻量小胶囊，不要 FilterChip 那种粗边框 —— 顶栏下面就这一行，
+ * 粗边框会显得很吵。
+ *
+ * 现在它跟搜索栏一起吸顶，列表往下滑的时候胶囊一直停在搜索栏下面，
+ * 换筛选不用先滚回中间。
+ */
+@Composable
+private fun ProviderFilterChips(
+    providers: List<ProviderKind>,
+    providerFilter: String?,
+    onProviderFilterChange: (String?) -> Unit,
+    /** 「云端」这一档是不是选中着 */
+    cloudSelected: Boolean,
+    onCloudClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        val options = listOf<Pair<String?, String>>(null to "全部") +
+            providers.map { it.id to it.shortLabel }
+        options.forEach { (id, label) ->
+            val selected = providerFilter == id
+            Text(
+                label,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                color = if (selected) MaterialTheme.colorScheme.onPrimary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(
+                        if (selected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.surfaceVariant
+                    )
+                    .clickable { onProviderFilterChange(id) }
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            )
+        }
+        // 云端胶囊：跟网盘并排。没登录时点它去登录页
+        Text(
+            "云端",
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = if (cloudSelected) FontWeight.Bold else FontWeight.Normal,
+            color = if (cloudSelected) MaterialTheme.colorScheme.onPrimary
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .clip(RoundedCornerShape(9.dp))
+                .background(
+                    if (cloudSelected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.surfaceVariant
+                )
+                .clickable { onCloudClick() }
+                .padding(horizontal = 12.dp, vertical = 6.dp)
         )
     }
 }

@@ -108,6 +108,11 @@ fun PlaylistListScreen(
         derivedStateOf { listState.firstVisibleItemIndex >= 1 }
     }
 
+    // 过滤：0 = 所有歌单，1 = 只看本地，2 = 只看云端
+    var filterMode by remember { mutableStateOf(0) }
+    val showLocal = filterMode != 2
+    val showCloud = filterMode != 1
+
     // 下拉刷新：本机歌单重读一遍，云端歌单重新拉一次。
     //
     // 云端那边可能加了新歌单（网页端加的），停在这个页面上不动是看不见的，
@@ -192,7 +197,7 @@ fun PlaylistListScreen(
                     )
                 }
 
-                // 找歌单：滑到顶就吸住
+                // 找歌单 + 过滤胶囊：一起吸顶，胶囊一直停在搜索栏下面
                 stickyHeader(key = "search") {
                     Column(
                         Modifier
@@ -206,6 +211,10 @@ fun PlaylistListScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp, vertical = 6.dp)
+                        )
+                        PlaylistFilterChips(
+                            mode = filterMode,
+                            onModeChange = { filterMode = it }
                         )
                     }
                 }
@@ -233,45 +242,11 @@ fun PlaylistListScreen(
                     }
                 }
 
-                if (listVm.visiblePlaylists.isEmpty()) {
-                    item(key = "empty") {
-                        Text(
-                            "没有匹配的歌单",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(32.dp),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                    }
-                } else {
-                    items(listVm.visiblePlaylists, key = { it.key }) { p ->
-                        PlaylistCard(
-                            playlist = p,
-                            imported = listVm.importedCounts[p.key] ?: 0,
-                            coverTrack = listVm.coverTracks[p.key],
-                            canUpload = vm.cloudLoggedIn,
-                            uploaded = p.cloudId > 0,
-                            onClick = { onOpenPlaylist(p.key) },
-                            onDelete = {
-                                // 只删本机这一份，云端那份是副本，还在那儿
-                                listVm.delete(p.key)
-                            },
-                            onUpload = { vm.uploadLocalPlaylist(p.key) }
-                        )
-                    }
-                }
-
-                // 云端歌单：单独一栏，跟本机歌单不混着
-                if (vm.cloudLoggedIn) {
-                    item(key = "cloud-header") {
-                        CloudPlaylistHeader(count = cloudVisible.size)
-                    }
-                    if (cloudVisible.isEmpty()) {
-                        item(key = "cloud-empty") {
+                if (showLocal) {
+                    if (listVm.visiblePlaylists.isEmpty()) {
+                        item(key = "empty") {
                             Text(
-                                "云端还没有歌单",
+                                "没有匹配的歌单",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier
@@ -281,11 +256,62 @@ fun PlaylistListScreen(
                             )
                         }
                     } else {
-                        items(cloudVisible, key = { "cloud-pl-${it.id}" }) { p ->
-                            CloudPlaylistCard(
+                        items(listVm.visiblePlaylists, key = { it.key }) { p ->
+                            PlaylistCard(
                                 playlist = p,
-                                onClick = { onOpenCloudPlaylist(p.id) },
-                                onDelete = { vm.deleteCloudPlaylist(p.id) }
+                                imported = listVm.importedCounts[p.key] ?: 0,
+                                coverTrack = listVm.coverTracks[p.key],
+                                canUpload = vm.cloudLoggedIn,
+                                uploaded = p.cloudId > 0,
+                                onClick = { onOpenPlaylist(p.key) },
+                                onDelete = {
+                                    // 只删本机这一份，云端那份是副本，还在那儿
+                                    listVm.delete(p.key)
+                                },
+                                onUpload = { vm.uploadLocalPlaylist(p.key) }
+                            )
+                        }
+                    }
+                }
+
+                // 云端歌单：单独一栏，跟本机歌单不混着
+                if (showCloud) {
+                    if (vm.cloudLoggedIn) {
+                        item(key = "cloud-header") {
+                            CloudPlaylistHeader(count = cloudVisible.size)
+                        }
+                        if (cloudVisible.isEmpty()) {
+                            item(key = "cloud-empty") {
+                                Text(
+                                    "云端还没有歌单",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(32.dp),
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            }
+                        } else {
+                            items(cloudVisible, key = { "cloud-pl-${it.id}" }) { p ->
+                                CloudPlaylistCard(
+                                    playlist = p,
+                                    onClick = { onOpenCloudPlaylist(p.id) },
+                                    onDelete = { vm.deleteCloudPlaylist(p.id) }
+                                )
+                            }
+                        }
+                    } else if (filterMode == 2) {
+                        // 没登录还选了「云端歌单」，得告诉人家先去登录，不然一片空白
+                        item(key = "cloud-empty") {
+                            Text(
+                                "登录云端账号后，这里才会显示云端歌单",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
                             )
                         }
                     }
@@ -464,6 +490,9 @@ private fun CloudPlaylistCover(playlist: CloudPlaylistRef) {
  *
  * 故意做成会滑走的那一块 —— 滑走之后顶栏顶上标题，
  * 屏幕上就只剩歌单列表，不会一直占着地方。
+ *
+ * 「导入歌单」的小胶囊挂在标题这一行的最右边，跟标题齐平，
+ * 比自己占一行省地方。
  */
 @Composable
 private fun PlaylistListHeader(
@@ -472,24 +501,27 @@ private fun PlaylistListHeader(
     totalImported: Int,
     onOpenImport: () -> Unit,
 ) {
-    Column(
+    Row(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            "我的歌单",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "共 $count 张歌单 · $totalTracks 首" +
-                if (totalImported > 0) " · 已导入 $totalImported 首" else "",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.height(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                "我的歌单",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "共 $count 张歌单 · $totalTracks 首" +
+                    if (totalImported > 0) " · 已导入 $totalImported 首" else "",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Spacer(Modifier.width(12.dp))
         // 小胶囊按钮，别用 Material 默认那个 40dp 高的 Button
         Box(
             Modifier
@@ -504,6 +536,46 @@ private fun PlaylistListHeader(
                 "导入歌单",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onPrimary
+            )
+        }
+    }
+}
+
+/**
+ * 歌单页的过滤胶囊：所有歌单 / 本地歌单 / 云端歌单。
+ *
+ * 跟「找歌单」搜索框放在同一个吸顶块里，往下滑也随时能切。
+ * 样式跟曲库页那排胶囊一致，都是轻量小胶囊，不要粗边框。
+ */
+@Composable
+private fun PlaylistFilterChips(
+    /** 0 = 所有，1 = 本地，2 = 云端 */
+    mode: Int,
+    onModeChange: (Int) -> Unit,
+) {
+    val options = listOf("所有歌单", "本地歌单", "云端歌单")
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        options.forEachIndexed { index, label ->
+            val selected = mode == index
+            Text(
+                label,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                color = if (selected) MaterialTheme.colorScheme.onPrimary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(
+                        if (selected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.surfaceVariant
+                    )
+                    .clickable { onModeChange(index) }
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
             )
         }
     }
