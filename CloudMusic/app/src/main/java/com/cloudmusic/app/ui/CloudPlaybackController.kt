@@ -38,6 +38,12 @@ class CloudPlaybackController(
     private var job: Job? = null
     private var scope: CoroutineScope? = null
 
+    /** 盯着播放器错误：直链失效时自动重新解析这一首。 */
+    private var errorJob: Job? = null
+
+    /** 已经自动重试过的歌：同一首只重试一次，免得转圈。 */
+    private val retriedKeys = mutableSetOf<String>()
+
     /**
      * 「点了占位歌」的竞态令牌。
      *
@@ -88,6 +94,7 @@ class CloudPlaybackController(
         val queue = items.map { if (it.key == target.key) ready else resolver.placeholder(it) }
         player.play(queue, idx)
         startWatching()
+        startErrorWatcher()
         return null
     }
 
@@ -98,6 +105,42 @@ class CloudPlaybackController(
         job = sc.launch {
             snapshotFlow { player.currentTrack?.key }
                 .collect { resolveAround(it) }
+        }
+    }
+
+    /**
+     * 直链失效自动重解析。
+     *
+     * 云端歌曲的直链是在线解析出来的，有时效（还绑着夸克 Cookie），
+     * 过期之后播放会直接失败。这时候不该让用户手动重试 ——
+     * 把这一首的解析缓存清掉、重新签发直链，再原地替换回队列，
+     * 播放器会接着往下播。
+     */
+    private fun startErrorWatcher() {
+        errorJob?.cancel()
+        val sc = scope ?: return
+        errorJob = sc.launch {
+            snapshotFlow { player.errorText }
+                .collect { err ->
+                    if (err == null) return@collect
+                    val cur = player.currentTrack ?: return@collect
+                    if (cur.provider != "cloud") return@collect
+                    val key = cur.key.removePrefix("cloud:")
+                    // 同一首只自动重试一次，重试还失败就别转了
+                    if (!retriedKeys.add(key)) return@collect
+                    val t = pending[key] ?: return@collect
+                    val idx = order.indexOf(key)
+                    if (idx < 0) return@collect
+                    android.util.Log.w("CM/Resolve", "「${t.title}」播放失败（$err），清缓存重新解析")
+                    resolver.invalidate(t)
+                    player.clearError()
+                    val res = resolver.resolve(t)
+                    val candidate = res.candidate
+                    if (candidate == null || candidate.audioUrl.isBlank()) return@collect
+                    val ready = resolver.toTrack(t, candidate)
+                    player.replaceMediaItem(idx, ready)
+                    retriedKeys.remove(key)
+                }
         }
     }
 
@@ -147,6 +190,8 @@ class CloudPlaybackController(
     fun release() {
         job?.cancel()
         job = null
+        errorJob?.cancel()
+        errorJob = null
         scope = null
         player.onUnresolvedPick = null
         pending.clear()

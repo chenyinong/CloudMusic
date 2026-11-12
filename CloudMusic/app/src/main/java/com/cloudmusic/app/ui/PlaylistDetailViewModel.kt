@@ -1,6 +1,7 @@
 ﻿package com.cloudmusic.app.ui
 
 import android.app.Application
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -233,6 +234,12 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
      */
     private var resolveToken = 0
 
+    /** 盯着播放器错误：直链失效时自动重新解析这一首。 */
+    private var errorJob: Job? = null
+
+    /** 已经自动重试过的歌：同一首只重试一次，免得转圈。 */
+    private val retriedKeys = mutableSetOf<String>()
+
     /** 只清行内试听 UI，不动播放队列、也不取消正在跑的起播协程。 */
     private fun clearOnlineUi() {
         onlineLoadingKey = null
@@ -450,6 +457,7 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
         // 队列始终是整张歌单：能播的进媒体队列，占位歌轮到之前解析好再插进去
         player.play(queue, startIndex)
         startResolver(queue.getOrNull(startIndex)?.key)
+        startErrorWatcher()
         onlineLoadingKey = null
         // 只有解析失败要挂提示（留在那一行）；「在线播放中」由 hintFor
         // 按当前曲目推导，播到下一首会自动挪过去
@@ -471,6 +479,60 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
             if (startKey != null) resolveAround(startKey)
             snapshotFlow { player.currentTrack?.key }
                 .collect { resolveAround(it) }
+        }
+    }
+
+    /**
+     * 直链失效自动重解析。
+     *
+     * 在线解析出来的直链是有时效的（还绑着夸克 Cookie），过期之后播放会
+     * 直接失败（412 / 打不开）。这时候不该让用户手动重试 —— 把这一首的
+     * 解析缓存清掉，重新搜一次源、重新签发直链，再原地替换回队列，
+     * 播放器会接着往下播。
+     *
+     * 只对「在线解析来的歌」生效：网盘文件播不了是别的问题（文件没了、
+     * 网络断了），重新解析也没用。
+     */
+    private fun startErrorWatcher() {
+        errorJob?.cancel()
+        errorJob = viewModelScope.launch {
+            snapshotFlow { player.errorText }
+                .collect { err ->
+                    if (err == null) return@collect
+                    val cur = player.currentTrack ?: return@collect
+                    if (cur.provider != "online") return@collect
+                    val key = cur.key.removePrefix("online:")
+                    // 同一首只自动重试一次：重试还是失败就别转了，不然死循环
+                    if (!retriedKeys.add(key)) return@collect
+                    val saved = tracks.firstOrNull { it.key == key } ?: return@collect
+                    val idx = queueOrder.indexOf(key)
+                    if (idx < 0) return@collect
+                    Log.w("CM/Resolve", "「${saved.title}」播放失败（$err），清缓存重新解析")
+                    // 缓存里的直链已经废了，先清掉
+                    appRef.playlistImport.invalidateCached(saved.title, saved.artist)
+                    // 顺手把播放器上的错误抹掉，不然红字会一直挂着
+                    player.clearError()
+                    val result = try {
+                        appRef.playlistImport.resolveForOnlinePlay(
+                            saved.toPlaylistTrack(), appRef.quarkClient.loggedIn
+                        )
+                    } catch (e: Exception) {
+                        OnlineResolution(reason = OnlineFailReason.SOURCE_ERROR)
+                    }
+                    val c = result.candidate
+                    if (c == null || c.audioUrl.isBlank()) {
+                        onlineHint = OnlineHint(
+                            key,
+                            "直链失效，重新解析也没拿到可播的音源",
+                            error = true
+                        )
+                        return@collect
+                    }
+                    // 原地换掉队列里的这一首：播放器会接着往下播
+                    player.replaceMediaItem(idx, buildOnlineTrack(key, c))
+                    resolvedKeys.add(key)
+                    retriedKeys.remove(key)
+                }
         }
     }
 
@@ -594,6 +656,8 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
     fun stopOnline() {
         onlineJob?.cancel()
         onlineJob = null
+        errorJob?.cancel()
+        errorJob = null
         clearOnlineUi()
     }
 

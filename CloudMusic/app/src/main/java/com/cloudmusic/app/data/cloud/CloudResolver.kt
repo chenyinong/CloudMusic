@@ -115,6 +115,16 @@ class CloudResolver(
         provider = PROVIDER_CLOUD,
     )
 
+    /**
+     * 作废这一首的解析缓存。
+     *
+     * 直链过期（还绑着夸克 Cookie）时播放会直接失败，
+     * 把缓存清掉，下一次解析就会重新搜源、重新签发直链。
+     */
+    fun invalidate(t: CloudTrack) {
+        playlistImport.invalidateCached(t.title, t.artist)
+    }
+
     companion object {
         /** 云端歌曲在 Track 里的来源标记。 */
         const val PROVIDER_CLOUD = "cloud"

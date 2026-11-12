@@ -111,7 +111,17 @@ class PlaylistImportService(
      */
     private val resolveCache = ConcurrentHashMap<String, CachedResolve>()
 
-    private class CachedResolve(val at: Long, val resolution: OnlineResolution)
+    private class CachedResolve(
+        val at: Long,
+        val resolution: OnlineResolution,
+        /**
+         * 这一条是给哪首歌解析的（歌名 + 歌手，规范化后）。
+         *
+         * 直链失效时要按它把缓存删掉 —— 缓存 key 里还有时长和平台 id，
+         * 而播放失败时手里只有解析结果那一份信息，对不上。
+         */
+        val subject: String,
+    )
 
     /**
      * 缓存的 key：歌名 + 歌手 + 时长 + 平台 id + 夸克 Cookie 摘要。
@@ -127,6 +137,11 @@ class PlaylistImportService(
         quarkCookie().trim().hashCode().toString(),
     ).joinToString("|")
 
+    /** 一首歌的「主体」：规范化后的歌名 + 歌手。失效时按它找缓存。 */
+    private fun subjectOf(title: String, artist: String): String =
+        TrackMatcher.norm(TrackMatcher.stripBrackets(title)).lowercase() + "|" +
+            TrackMatcher.norm(TrackMatcher.stripBrackets(artist)).lowercase()
+
     /** 缓存还在有效期内就返回，过期的顺手清掉。 */
     private fun cachedResolve(key: String): OnlineResolution? {
         val hit = resolveCache[key] ?: return null
@@ -138,9 +153,21 @@ class PlaylistImportService(
         return hit.resolution
     }
 
-    private fun cacheResolve(key: String, res: OnlineResolution) {
+    private fun cacheResolve(key: String, res: OnlineResolution, subject: String) {
         if (resolveCache.size >= RESOLVE_CACHE_MAX) resolveCache.clear()
-        resolveCache[key] = CachedResolve(System.currentTimeMillis(), res)
+        resolveCache[key] = CachedResolve(System.currentTimeMillis(), res, subject)
+    }
+
+    /**
+     * 作废某一首的解析缓存。
+     *
+     * 直链会过期（还绑着夸克 Cookie），播放报 412 / 打不开的时候，
+     * 把这一首从缓存里清掉 —— 下次解析就会重新搜源、重新签发直链。
+     */
+    fun invalidateCached(title: String, artist: String) {
+        val subject = subjectOf(title, artist)
+        val removed = resolveCache.entries.removeIf { it.value.subject == subject }
+        if (removed) Log.d("CM/Resolve", "「$title」直链可能失效，清掉解析缓存")
     }
 
     suspend fun fetchPlaylist(ref: PlaylistRef): ImportedPlaylist = playlists.fetch(ref)
@@ -260,7 +287,7 @@ class PlaylistImportService(
                         Log.d("CM/Resolve", "放宽匹配命中「${c.title}」-「${c.artist}」")
                     }
                     val res = OnlineResolution(hit, relaxed = pass == 1)
-                    cacheResolve(key, res)
+                    cacheResolve(key, res, subjectOf(track.title, track.artist))
                     return@withContext res
                 }
             }
@@ -270,7 +297,7 @@ class PlaylistImportService(
         partialHit?.let {
             Log.w("CM/Resolve", "「${track.title}」所有源都只有试听片段")
             val res = OnlineResolution(it, partialOnly = true)
-            cacheResolve(key, res)
+            cacheResolve(key, res, subjectOf(track.title, track.artist))
             return@withContext res
         }
 
@@ -282,7 +309,7 @@ class PlaylistImportService(
         }
         Log.w("CM/Resolve", "「${track.title}」所有源都没拿到直链：$reason")
         val failed = OnlineResolution(reason = reason)
-        cacheResolve(key, failed)
+        cacheResolve(key, failed, subjectOf(track.title, track.artist))
         failed
     }
 
