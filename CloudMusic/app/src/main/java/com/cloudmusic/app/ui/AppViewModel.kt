@@ -624,6 +624,28 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             .onSuccess { refreshCloudCache() }
     }
 
+    /**
+     * 「我的」页下拉刷新：重新扫一遍网盘，再拉一次云端收藏。
+     *
+     * 跟 [rescan] 的两处不同：
+     * - 不跳登录页（没登录网盘就只拉云端，下拉手势里跳页面太突兀）；
+     * - 返回 Job，界面可以等它做完再收起下拉指示器。
+     */
+    fun refreshLibrary(): Job = viewModelScope.launch {
+        if (loggedIn) {
+            _busy.value = true
+            _status.value = "正在扫描音乐库…"
+            try {
+                scanAllProviders()
+            } catch (e: Exception) {
+                _status.value = friendlyError(e)
+            } finally {
+                _busy.value = false
+            }
+        }
+        refreshCloudFavorites().join()
+    }
+
     /** 手动同步一次。 */
     fun cloudSyncNow() {        if (cloudBusy) return
         if (!prefs.cloudLoggedIn) {

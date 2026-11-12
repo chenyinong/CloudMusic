@@ -1,5 +1,6 @@
 package com.cloudmusic.app.ui
 
+import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -70,6 +71,7 @@ import androidx.compose.ui.unit.sp
 import com.cloudmusic.app.data.ProviderKind
 import com.cloudmusic.app.data.Track
 import com.cloudmusic.app.data.cloud.CloudTrack
+import kotlinx.coroutines.delay
 
 /**
  * 曲库筛选里的「云端」这一档。
@@ -131,13 +133,16 @@ fun LibraryScreen(
     // 进页面顺手拉一次云端收藏（网页端可能刚改过）
     LaunchedEffect(Unit) { vm.refreshCloudFavorites() }
 
-    // 下拉刷新：云端收藏重新拉一次。
+    // 下拉刷新：重扫网盘 + 拉云端收藏。
     //
-    // 网页端收藏了歌，停在这个页面上不动是看不见的，下拉一下就同步过来。
+    // 指示器至少亮 600ms —— 刷新很快的话一闪而过，像没反应。
     var refreshing by remember { mutableStateOf(false) }
     LaunchedEffect(refreshing) {
         if (refreshing) {
-            vm.refreshCloudFavorites().join()
+            val start = SystemClock.elapsedRealtime()
+            vm.refreshLibrary().join()
+            val spent = SystemClock.elapsedRealtime() - start
+            if (spent < MIN_SPIN_MS) delay(MIN_SPIN_MS - spent)
             refreshing = false
         }
     }
@@ -182,15 +187,19 @@ fun LibraryScreen(
     ) { padding ->
         // 整页一个滚动列表：头卡随内容滑走，搜索框吸顶，列表占满剩余空间。
         // 这样第一屏有视觉重心，往下滚又不浪费可视区域。
+        //
+        // padding 要加在 RefreshBox 上（不是里面的 LazyColumn）：
+        // 加在 LazyColumn 上的话，外层容器会顶到屏幕最上头，
+        // 下拉时那个指示器正好落在顶栏底下，被顶栏挡住看不见。
         RefreshBox(
             refreshing = refreshing,
             onRefresh = { refreshing = true },
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
         ) {
         LazyColumn(
-            Modifier
-                .fillMaxSize()
-                .padding(padding),
+            Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = LocalScreenBottomPad.current)
         ) {
             item(key = "hero") {

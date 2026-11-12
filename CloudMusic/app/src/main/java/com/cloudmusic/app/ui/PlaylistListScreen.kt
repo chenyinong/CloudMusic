@@ -1,5 +1,6 @@
 ﻿package com.cloudmusic.app.ui
 
+import android.os.SystemClock
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -65,6 +66,7 @@ import com.cloudmusic.app.App
 import com.cloudmusic.app.data.Track
 import com.cloudmusic.app.data.cloud.CloudPlaylistRef
 import com.cloudmusic.app.data.playlist.SavedPlaylist
+import kotlinx.coroutines.delay
 
 /**
  * 「我的歌单」列表，抄的是网易云音乐的用法：
@@ -120,8 +122,12 @@ fun PlaylistListScreen(
     var refreshing by remember { mutableStateOf(false) }
     LaunchedEffect(refreshing) {
         if (refreshing) {
+            val start = SystemClock.elapsedRealtime()
             listVm.refresh().join()
             vm.refreshCloudPlaylists().join()
+            // 指示器至少亮 600ms —— 一闪而过的话像没反应
+            val spent = SystemClock.elapsedRealtime() - start
+            if (spent < MIN_SPIN_MS) delay(MIN_SPIN_MS - spent)
             refreshing = false
         }
     }
