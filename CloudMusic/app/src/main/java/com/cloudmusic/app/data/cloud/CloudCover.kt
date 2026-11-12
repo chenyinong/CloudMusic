@@ -27,8 +27,13 @@ class CloudCover(private val http: OkHttpClient) {
         /** 一次最多查多少首歌的封面（网易云批量接口的上限） */
         private const val BATCH = 50
 
-        /** 一张歌单最多补多少首的封面（封面只要第一首，多补几张防第一首查不到） */
-        private const val FILL_LIMIT = 20
+        /**
+         * 一张歌单最多补多少首的封面。
+         *
+         * 歌单封面只认第一首，补前三首是留个余量（第一首万一查不到）。
+         * 补得越多越慢 —— 上传要等这个，不能拖成几十秒。
+         */
+        private const val FILL_LIMIT = 3
     }
 
     /**

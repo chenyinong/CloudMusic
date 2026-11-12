@@ -359,7 +359,7 @@ fun PlaylistDetailScreen(
             containerColor = MaterialTheme.colorScheme.surface,
             title = { Text("删掉这张歌单？") },
             text = {
-                Text("只删 App 里的这张歌单清单，已经导进网盘的歌曲不会动。")
+                Text("只删 App 里的这张歌单清单，已经导进网盘的歌曲不会动。\n云端上传的那份也不受影响，要删去「云端歌单」里删。")
             },
             confirmButton = {
                 TextButton(onClick = {

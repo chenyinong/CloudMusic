@@ -11,6 +11,7 @@ import com.cloudmusic.app.data.Track
 import com.cloudmusic.app.data.playlist.SavedPlaylist
 import com.cloudmusic.app.data.playlist.TrackMatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -55,19 +56,18 @@ class PlaylistListViewModel(app: Application) : AndroidViewModel(app) {
     val totalImported: Int
         get() = importedCounts.values.sum()
 
-    fun refresh() {
+    /** 重新读一遍本机歌单。返回 Job，调用方（比如下拉刷新）可以等它做完。 */
+    fun refresh(): Job = viewModelScope.launch {
         loading = true
-        viewModelScope.launch {
-            val list = withContext(Dispatchers.IO) { store.playlists() }
-            val counts = withContext(Dispatchers.IO) {
-                list.associate { it.key to store.importedCount(it.key) }
-            }
-            val covers = withContext(Dispatchers.IO) { coverTracksFor(list) }
-            playlists = list
-            importedCounts = counts
-            coverTracks = covers
-            loading = false
+        val list = withContext(Dispatchers.IO) { store.playlists() }
+        val counts = withContext(Dispatchers.IO) {
+            list.associate { it.key to store.importedCount(it.key) }
         }
+        val covers = withContext(Dispatchers.IO) { coverTracksFor(list) }
+        playlists = list
+        importedCounts = counts
+        coverTracks = covers
+        loading = false
     }
 
     /**
@@ -99,21 +99,15 @@ class PlaylistListViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * 删一张本机歌单。
      *
-     * 已经同步到云端的那张，云端也一起删 —— 两边是同一张单，
-     * 只删一半的话，「云端歌单」分组里还杵着一张，用户看着就像没删掉。
+     * **只删本机这一份。** 云端的那份是上传过去的副本，删了本机的不该
+     * 把它也带走 —— 云端歌单是能分享给别的设备的，本机这份才是自己的原件。
+     * 想连云端那份一起删，去「云端歌单」分组里删那张。
      */
     fun delete(key: String) {
         viewModelScope.launch {
-            val saved = withContext(Dispatchers.IO) { store.playlist(key) }
-            val cloudId = saved?.cloudId ?: 0L
-            if (cloudId > 0 && appRef.prefs.cloudLoggedIn) {
-                // 云端删不掉也别拦着删本机的 —— 本机这份才是用户自己的
-                runCatching { appRef.cloudSync.deletePlaylist(cloudId) }
-            }
             withContext(Dispatchers.IO) { store.delete(key) }
             refresh()
-            message = if (cloudId > 0) "歌单已删除（本机和云端都删了），网盘里的歌还在"
-            else "歌单已删除，网盘里的歌还在"
+            message = "歌单已删除，云端那份还在（要删去「云端歌单」里删）"
         }
     }
 }

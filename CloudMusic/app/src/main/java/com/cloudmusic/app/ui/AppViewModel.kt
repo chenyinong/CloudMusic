@@ -609,22 +609,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * 只拉一次云端收藏（进「我的」页时调）。
      *
      * 比全量同步轻 —— 歌单不动，只更新收藏。
+     * 返回 Job，调用方（比如下拉刷新）可以等它做完。
      */
-    fun refreshCloudFavorites() {
-        if (!prefs.cloudLoggedIn) return
-        viewModelScope.launch {
-            runCatching { appRef.cloudSync.pullFavorites() }
-                .onSuccess { refreshCloudCache() }
-        }
+    fun refreshCloudFavorites(): Job = viewModelScope.launch {
+        if (!prefs.cloudLoggedIn) return@launch
+        runCatching { appRef.cloudSync.pullFavorites() }
+            .onSuccess { refreshCloudCache() }
     }
 
-    /** 只拉一次云端歌单列表（进「歌单」页时调）。 */
-    fun refreshCloudPlaylists() {
-        if (!prefs.cloudLoggedIn) return
-        viewModelScope.launch {
-            runCatching { appRef.cloudSync.pullPlaylists() }
-                .onSuccess { refreshCloudCache() }
-        }
+    /** 只拉一次云端歌单列表（进「歌单」页时调）。返回 Job，调用方可以等它做完。 */
+    fun refreshCloudPlaylists(): Job = viewModelScope.launch {
+        if (!prefs.cloudLoggedIn) return@launch
+        runCatching { appRef.cloudSync.pullPlaylists() }
+            .onSuccess { refreshCloudCache() }
     }
 
     /** 手动同步一次。 */
@@ -765,7 +762,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
                 val tracks = withContext(Dispatchers.IO) { appRef.playlistStore.tracks(playlistKey) }
+                _status.value = "正在上传《${saved.name}》（${tracks.size} 首）到云端…"
                 val cloudTracks = appRef.cloudSync.toCloudTracks(saved, tracks)
+
+                // 已经同步过的那张：先把云端旧的删掉再建新的。
+                //
+                // 不这么做的话，云端会堆一堆同名的歌单 —— 每点一次「上传」多一张。
+                val oldCloudId = saved.cloudId
+                if (oldCloudId > 0) {
+                    runCatching { appRef.cloudSync.deletePlaylist(oldCloudId) }
+                }
+
                 val cloudId = appRef.cloudSync.pushPlaylist(
                     name = saved.name,
                     platform = appRef.cloudSync.cloudPlatformOf(saved.platform),
@@ -778,6 +785,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 _error.value = e.message ?: "上传失败"
             } finally {
+                _status.value = ""
                 cloudBusy = false
             }
         }
@@ -793,12 +801,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 // 只清本地缓存是不够的 —— 进页面时那次「拉歌单列表」可能还在路上，
                 // 它要是晚一步到，就会把刚删掉的歌单又写回本地，看着就像没删掉。
                 runCatching { appRef.cloudSync.pullPlaylists() }
-                // 本机那张如果是同一张（上传上去的），也一起删 ——
-                // 不然「歌单」页还杵着一张，用户看着就像没删掉。
-                val local = withContext(Dispatchers.IO) { appRef.playlistStore.playlistByCloudId(id) }
-                if (local != null) {
-                    withContext(Dispatchers.IO) { appRef.playlistStore.delete(local.key) }
-                }
                 refreshCloudCache()
                 cloudSay("云端歌单已删除")
             } catch (e: Exception) {

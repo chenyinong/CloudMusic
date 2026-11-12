@@ -273,16 +273,11 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
      * 只删 App 里的这张清单，已经导进网盘的歌不动 —— 它们还在曲库里，
      * 照常能播。删完 [onDone] 回调让页面退回列表。
      *
-     * 已经同步到云端的那张，云端那份也一起删 —— 两边是同一张单，
-     * 只删一半的话「云端歌单」分组里还杵着一张，看着像没删掉。
+     * **云端那份不跟着删。** 云端歌单是上传过去的副本，能分享给别的设备；
+     * 本机这份才是自己的原件，删它不该把云端那份也带走。
      */
     fun deletePlaylist(key: String, onDone: () -> Unit) {
         viewModelScope.launch {
-            val saved = withContext(Dispatchers.IO) { store.playlist(key) }
-            val cloudId = saved?.cloudId ?: 0L
-            if (cloudId > 0 && appRef.prefs.cloudLoggedIn) {
-                runCatching { appRef.cloudSync.deletePlaylist(cloudId) }
-            }
             withContext(Dispatchers.IO) { store.delete(key) }
             onDone()
         }

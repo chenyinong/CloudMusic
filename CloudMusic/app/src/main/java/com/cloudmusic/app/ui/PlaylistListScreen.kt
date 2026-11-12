@@ -31,6 +31,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -107,6 +108,19 @@ fun PlaylistListScreen(
         derivedStateOf { listState.firstVisibleItemIndex >= 1 }
     }
 
+    // 下拉刷新：本机歌单重读一遍，云端歌单重新拉一次。
+    //
+    // 云端那边可能加了新歌单（网页端加的），停在这个页面上不动是看不见的，
+    // 下拉一下就同步过来。
+    var refreshing by remember { mutableStateOf(false) }
+    LaunchedEffect(refreshing) {
+        if (refreshing) {
+            listVm.refresh().join()
+            vm.refreshCloudPlaylists().join()
+            refreshing = false
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
         CenterAlignedTopAppBar(
             title = {
@@ -156,6 +170,13 @@ fun PlaylistListScreen(
                 Button(onClick = onOpenImport) { Text("导入歌单") }
             }
         } else {
+            RefreshBox(
+                refreshing = refreshing,
+                onRefresh = {
+                    refreshing = true
+                },
+                modifier = Modifier.fillMaxSize()
+            ) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
@@ -189,6 +210,29 @@ fun PlaylistListScreen(
                     }
                 }
 
+                // 上传中：给个进度提示，别让用户对着没反应的界面干等
+                if (vm.cloudBusy) {
+                    item(key = "busy") {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                "正在上传到云端…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
                 if (listVm.visiblePlaylists.isEmpty()) {
                     item(key = "empty") {
                         Text(
@@ -208,12 +252,11 @@ fun PlaylistListScreen(
                             imported = listVm.importedCounts[p.key] ?: 0,
                             coverTrack = listVm.coverTracks[p.key],
                             canUpload = vm.cloudLoggedIn,
+                            uploaded = p.cloudId > 0,
                             onClick = { onOpenPlaylist(p.key) },
                             onDelete = {
-                                // 删本机那张；如果它同步到云端了，云端那份也一起删
+                                // 只删本机这一份，云端那份是副本，还在那儿
                                 listVm.delete(p.key)
-                                // 云端列表也得跟着刷新，别留着一张幽灵卡片
-                                vm.refreshCloudPlaylists()
                             },
                             onUpload = { vm.uploadLocalPlaylist(p.key) }
                         )
@@ -247,6 +290,7 @@ fun PlaylistListScreen(
                         }
                     }
                 }
+            }
             }
         }
     }
@@ -477,6 +521,8 @@ private fun PlaylistCard(
     imported: Int,
     coverTrack: Track?,
     canUpload: Boolean,
+    /** 这张是不是已经同步到云端了 */
+    uploaded: Boolean,
     onClick: () -> Unit,
     onDelete: () -> Unit,
     onUpload: () -> Unit,
@@ -575,9 +621,9 @@ private fun PlaylistCard(
                     }
                     if (canUpload) {
                         AppMenuItem(
-                            text = "上传到云端",
+                            text = if (uploaded) "重新上传到云端" else "上传到云端",
                             icon = Icons.Outlined.CloudUpload,
-                            subtitle = "网页版也能看到这张单"
+                            subtitle = if (uploaded) "云端已有一份，会替换掉" else "网页版也能看到这张单"
                         ) {
                             menuOpen = false
                             onUpload()

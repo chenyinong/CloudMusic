@@ -29,6 +29,8 @@ import com.cloudmusic.app.ui.PlayerConnection
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 
 class App : Application() {
 
@@ -150,13 +152,31 @@ class App : Application() {
         playlistImporter = PlaylistTrackImporter(musicSearch)
 
         // 云端（网页版云音乐）这一套
+        //
+        // 云端接口也是 API，响应很快 —— 超时压到 15 秒。
+        // 主 client 的 readTimeout 是 60 秒（下载音频要那么久），
+        // 拿来调接口的话 CF 那边一抽风就能把界面干等一分钟。
         cloudClient = CloudClient(
-            http = repository.http,
+            http = OkHttpClient.Builder()
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .writeTimeout(15, TimeUnit.SECONDS)
+                .followRedirects(true)
+                .build(),
             baseUrl = { prefs.cloudServerUrl },
             token = { prefs.cloudToken },
         )
         cloudStore = CloudStore(db)
-        cloudCover = CloudCover(repository.http)
+        // 封面查询单独一个 client：短超时。
+        //
+        // 主 client 的 readTimeout 是 60 秒（下载音频要那么久），
+        // 拿来查封面的话，网易云那边一抽风就能把「上传到云端」卡住一分钟。
+        cloudCover = CloudCover(OkHttpClient.Builder()
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.SECONDS)
+            .writeTimeout(5, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .build())
         cloudSync = CloudSync(cloudClient, cloudStore, prefs, cloudCover)
         cloudResolver = CloudResolver(
             playlistImport = playlistImport,

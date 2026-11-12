@@ -6,6 +6,9 @@ import com.cloudmusic.app.data.playlist.PlaylistPlatform
 import com.cloudmusic.app.data.playlist.SavedPlaylist
 import com.cloudmusic.app.data.playlist.SavedTrack
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 
 /**
@@ -33,6 +36,14 @@ class CloudSync(
          * 用户看着就像删除没生效。这个墓碑就是挡这一下的。
          */
         private const val DELETE_TOMBSTONE_MS = 60_000L
+
+        /**
+         * 一次最多给几张歌单补封面。
+         *
+         * 每补一张就是一次「拉明细 + 查封面」，歌单一多就拖成分钟级。
+         * 剩下的下次再补 —— 封面晚点显示没关系，别把列表卡住。
+         */
+        private const val MAX_DETAIL_FETCH = 6
     }
 
     /** 刚删掉的歌单 id → 删除时刻。 */
@@ -94,19 +105,39 @@ class CloudSync(
             if (now - it0.next().value > DELETE_TOMBSTONE_MS) it0.remove()
         }
         val skip = recentDeletes.keys
+
+        // 概要先存下来 —— 界面马上就能列出歌单，不用等封面
         for (p in list) {
             // 刚删掉的，别让旧的拉取结果又写回来
             if (p.id in skip) continue
-            if (p.cover.isBlank()) {
-                // 云端没给封面 → 拉一次明细，自己按第一首歌算
-                val detail = runCatching { client.playlist(p.id) }.getOrNull()
-                if (detail != null) {
-                    store.savePlaylist(detail, coverUrlOf(detail.tracks))
-                    continue
-                }
-            }
             store.savePlaylistRef(p)
         }
+
+        // 云端没给封面的那些，拉明细自己按第一首歌算。
+        //
+        // 并发着拉，别一张一张串行等 —— 串行的话每张都要等一个 RTT，
+        // 歌单一多就成分钟级的等待了。
+        val needCover = list.filter { it.cover.isBlank() && it.id !in skip }
+            .take(MAX_DETAIL_FETCH)
+        if (needCover.isNotEmpty()) {
+            // 「拉明细」和「查封面」都放进各自的协程里。
+            //
+            // 查封面是外部请求（网易云），串行的话 6 张歌单就是 6 个超时等待，
+            // 并发起来就只是一波。
+            coroutineScope {
+                needCover.map { p ->
+                    async(Dispatchers.IO) {
+                        val detail = runCatching { client.playlist(p.id) }.getOrNull()
+                        if (detail != null) {
+                            store.savePlaylist(detail, coverUrlOf(detail.tracks))
+                        } else {
+                            store.savePlaylistRef(p)
+                        }
+                    }
+                }.awaitAll()
+            }
+        }
+
         // 云端是权威：云端已经删掉的，本地也别留着。
         //
         // 不这么清的话会出这个幺蛾子 ——「删除」和「刷新列表」并发时，
@@ -146,7 +177,20 @@ class CloudSync(
         tracks: List<CloudTrack>,
     ): Long = withContext(Dispatchers.IO) {
         val id = client.createPlaylist(name, platform, tracks)
-        pullPlaylists()
+        // 只把这张新单写进本地缓存，**不要**为了它把整个列表重新拉一遍。
+        //
+        // 全量刷新不光慢（还要给每张没封面的歌单拉明细），还容易跟删除撞车。
+        // 这里直接按返回的 id 建一条本地记录，界面立刻就能看到这张单。
+        store.savePlaylistRef(
+            CloudPlaylistRef(
+                id = id,
+                name = name,
+                platform = platform,
+                updatedAt = System.currentTimeMillis(),
+                trackCount = tracks.size,
+                cover = tracks.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl ?: "",
+            )
+        )
         id
     }
 

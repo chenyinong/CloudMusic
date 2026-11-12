@@ -131,6 +131,17 @@ fun LibraryScreen(
     // 进页面顺手拉一次云端收藏（网页端可能刚改过）
     LaunchedEffect(Unit) { vm.refreshCloudFavorites() }
 
+    // 下拉刷新：云端收藏重新拉一次。
+    //
+    // 网页端收藏了歌，停在这个页面上不动是看不见的，下拉一下就同步过来。
+    var refreshing by remember { mutableStateOf(false) }
+    LaunchedEffect(refreshing) {
+        if (refreshing) {
+            vm.refreshCloudFavorites().join()
+            refreshing = false
+        }
+    }
+
     val cloudFavs = remember(cloudFavorites, query) {
         if (query.isBlank()) cloudFavorites else cloudFavorites.filter {
             it.title.contains(query, true) ||
@@ -171,6 +182,11 @@ fun LibraryScreen(
     ) { padding ->
         // 整页一个滚动列表：头卡随内容滑走，搜索框吸顶，列表占满剩余空间。
         // 这样第一屏有视觉重心，往下滚又不浪费可视区域。
+        RefreshBox(
+            refreshing = refreshing,
+            onRefresh = { refreshing = true },
+            modifier = Modifier.fillMaxSize()
+        ) {
         LazyColumn(
             Modifier
                 .fillMaxSize()
@@ -429,6 +445,7 @@ fun LibraryScreen(
 
             // 底部留白由 Root 统一处理（迷你播放器 + 导航栏）
             item { Spacer(Modifier.height(16.dp)) }
+        }
         }
     }
 
