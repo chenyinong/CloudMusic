@@ -288,26 +288,24 @@ class PlayerConnection(private val context: Context) {
     /**
      * 往播放队列末尾追加一首，不打断当前播放。
      *
-     * MediaController 不能直接改队列（那得往播放服务发指令），
-     * 所以这里把队列重建一遍，但把当前曲目和播放位置都保住 ——
-     * 听起来像「加进队列」，实际效果也是。
+     * 以前这里是「整张队列重建 + prepare」：加一首歌会让当前这首重新建连、
+     * 重新缓冲，听着就是断一下；曲库歌多的时候重建本身也费劲。
+     * 现在只往媒体队列末尾追加一个 item —— 当前 item 一点不碰，缓冲留着。
+     *
+     * mediaToLogical（媒体队列下标 → 逻辑队列下标）要跟着补一条：
+     * 逻辑队列里可能有「还没解析出直链的占位歌」（歌单在线混播），它们不进
+     * 媒体队列，所以追加到队尾时逻辑下标和媒体下标不一定相等。
      */
     fun enqueue(track: Track) {
         val c = controller ?: return
-        val cur = currentTrack
-        val base = if (playlist.isEmpty()) listOf(track) else playlist + track
-        val logicalIdx = cur?.let { t -> base.indexOfFirst { it.key == t.key } }?.takeIf { it >= 0 } ?: 0
-        val pos = c.currentPosition
+        // 占位歌还没直链，进不了媒体队列
+        if (track.url.isBlank()) return
+        val logicalIndex = playlist.size
+        val base = playlist + track
         playlist = base
         queue = base
-        val playable = base.withIndex().filter { it.value.url.isNotBlank() }
-        mediaToLogical = playable.map { it.index }
-        val items = playable.map { toMediaItem(it.value) }
-        if (items.isEmpty()) return
-        val mediaIdx = mediaToLogical.indexOfFirst { it >= logicalIdx }
-            .takeIf { it >= 0 } ?: items.lastIndex
-        c.setMediaItems(items, mediaIdx, pos)
-        c.prepare()
+        c.addMediaItem(toMediaItem(track))
+        mediaToLogical = mediaToLogical + logicalIndex
     }
 
     fun toggle() {

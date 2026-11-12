@@ -3,8 +3,12 @@ package com.cloudmusic.app.data.playlist
 import android.util.Log
 import com.cloudmusic.app.data.Track
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.net.URLEncoder
+import java.util.concurrent.ConcurrentHashMap
 
 /** 在线解析没成功时，卡在哪一步（给用户看的分类，不是异常堆栈）。 */
 enum class OnlineFailReason {
@@ -41,6 +45,13 @@ data class OnlineResolution(
 class PlaylistImportService(
     private val playlists: PlaylistRepository,
     private val sources: List<AudioSource>,
+    /**
+     * 本机夸克 Cookie。
+     *
+     * 夸克直链是会话绑定的：Cookie 一换，缓存里的旧直链就废了（CDN 412），
+     * 所以缓存的 key 里要带上 Cookie 的摘要。
+     */
+    private val quarkCookie: () -> String = { "" },
 ) {
 
     companion object {
@@ -70,6 +81,66 @@ class PlaylistImportService(
 
         /** 没有音源时给用户的兜底搜索链接（实测该站搜索参数是 q）。 */
         private const val FALLBACK_SEARCH = "https://so.liumingye.cn/search?q="
+
+        /**
+         * 解析成功的缓存留多久（毫秒）。
+         *
+         * 直链会过期（还绑着 Cookie），不敢给太长，30 分钟够覆盖
+         * 「在歌单里来回点、上一首下一首」这种用法。
+         */
+        private const val RESOLVE_CACHE_TTL = 30 * 60 * 1000L
+
+        /**
+         * 失败的解析也缓存一小会儿。
+         *
+         * 解析不出来的歌反复重试只是白等，3 分钟够了。
+         */
+        private const val RESOLVE_FAIL_TTL = 3 * 60 * 1000L
+
+        /** 缓存最多留多少条，超了整体清掉。 */
+        private const val RESOLVE_CACHE_MAX = 200
+    }
+
+    /**
+     * 解析结果缓存。
+     *
+     * 同一首歌反复切（歌单里来回点、上一首下一首、这张单和那张单里都有）
+     * 不该每次都重新搜源 + 重新签发直链 —— 那是切歌慢的大头。
+     *
+     * 这是 App 级单例上的缓存，所以本机歌单、云端歌单、在线混播全都共用一份。
+     */
+    private val resolveCache = ConcurrentHashMap<String, CachedResolve>()
+
+    private class CachedResolve(val at: Long, val resolution: OnlineResolution)
+
+    /**
+     * 缓存的 key：歌名 + 歌手 + 时长 + 平台 id + 夸克 Cookie 摘要。
+     *
+     * Cookie 摘要必须带上 —— 换了 Cookie 之后旧直链直接 412，
+     * 不隔离开的话用户会看到「刚才还能播的歌突然播不了」。
+     */
+    private fun cacheKey(track: PlaylistTrack): String = listOf(
+        track.title.trim().lowercase(),
+        track.artist.trim().lowercase(),
+        track.durationSec.toString(),
+        track.platformId.orEmpty(),
+        quarkCookie().trim().hashCode().toString(),
+    ).joinToString("|")
+
+    /** 缓存还在有效期内就返回，过期的顺手清掉。 */
+    private fun cachedResolve(key: String): OnlineResolution? {
+        val hit = resolveCache[key] ?: return null
+        val ttl = if (hit.resolution.candidate != null) RESOLVE_CACHE_TTL else RESOLVE_FAIL_TTL
+        if (System.currentTimeMillis() - hit.at > ttl) {
+            resolveCache.remove(key)
+            return null
+        }
+        return hit.resolution
+    }
+
+    private fun cacheResolve(key: String, res: OnlineResolution) {
+        if (resolveCache.size >= RESOLVE_CACHE_MAX) resolveCache.clear()
+        resolveCache[key] = CachedResolve(System.currentTimeMillis(), res)
     }
 
     suspend fun fetchPlaylist(ref: PlaylistRef): ImportedPlaylist = playlists.fetch(ref)
@@ -120,34 +191,28 @@ class PlaylistImportService(
                 "关键词=${SearchKeywords.forTrack(track.title, track.artist)}"
         )
 
+        // 缓存命中就直接返回：同一首歌反复切，不该每次都重新搜源 + 重新签发直链
+        val key = cacheKey(track)
+        cachedResolve(key)?.let {
+            Log.d("CM/Resolve", "「${track.title}」命中解析缓存")
+            return@withContext it
+        }
+
         val targetTag = TrackMatcher.variantTag(track.title, track.artist)
         val strictBySource = LinkedHashMap<String, List<AudioCandidate>>()
         val relaxedBySource = LinkedHashMap<String, List<AudioCandidate>>()
 
-        for (source in ordered) {
-            val raw = try {
-                when {
-                    // 网易云歌单自带歌曲 id，不用再搜一遍
-                    source.id == "netease" && track.platformId != null -> listOf(
-                        AudioCandidate(
-                            sourceId = "netease",
-                            sourceLabel = "网易云",
-                            songId = track.platformId,
-                            title = track.title,
-                            artist = track.artist,
-                            album = track.album,
-                            durationSec = track.durationSec,
-                            variantTag = targetTag
-                        )
-                    )
-                    else -> source.search(track.title, track.artist, track.durationSec)
-                }
-            } catch (e: Exception) {
-                // 一个源挂了就换下一个，不能连累整首歌
-                Log.w("CM/Resolve", "[${source.id}] 整源搜索失败：${e.message}", e)
-                continue
-            }
-
+        // 各源并行搜索。
+        //
+        // 原来是串行的：夸克不中才查网易云，网易云不中才查酷我，
+        // 等待时间一层层叠加，点一首歌要等好几秒（网页版那边早就改成并行了）。
+        // 现在三个源同时搜，等最慢的那个就行；
+        // 下面的探测顺序不变（夸克优先），所以「夸克拿到完整版立刻返回」
+        // 这个老规矩还留着。
+        val searched = coroutineScope {
+            ordered.map { source -> async { source to searchCandidates(source, track) } }.awaitAll()
+        }
+        for ((source, raw) in searched) {
             val strict = raw.filter {
                 TrackMatcher.sameTitle(it.title, track.title) &&
                     TrackMatcher.artistHit(track.artist, it.artist)
@@ -194,7 +259,9 @@ class PlaylistImportService(
                     if (pass == 1) {
                         Log.d("CM/Resolve", "放宽匹配命中「${c.title}」-「${c.artist}」")
                     }
-                    return@withContext OnlineResolution(hit, relaxed = pass == 1)
+                    val res = OnlineResolution(hit, relaxed = pass == 1)
+                    cacheResolve(key, res)
+                    return@withContext res
                 }
             }
         }
@@ -202,7 +269,9 @@ class PlaylistImportService(
         // 所有源都只有片段才拿第一个兜底，并明确告诉上层「这只是片段」
         partialHit?.let {
             Log.w("CM/Resolve", "「${track.title}」所有源都只有试听片段")
-            return@withContext OnlineResolution(it, partialOnly = true)
+            val res = OnlineResolution(it, partialOnly = true)
+            cacheResolve(key, res)
+            return@withContext res
         }
 
         val reason = when {
@@ -212,7 +281,41 @@ class PlaylistImportService(
             else -> OnlineFailReason.NO_SAME_TITLE
         }
         Log.w("CM/Resolve", "「${track.title}」所有源都没拿到直链：$reason")
-        OnlineResolution(reason = reason)
+        val failed = OnlineResolution(reason = reason)
+        cacheResolve(key, failed)
+        failed
+    }
+
+    /**
+     * 一个源搜出来的候选。
+     *
+     * 单独抽出来是为了能并行跑 —— 原来三个源是一个搜完再搜下一个，
+     * 等待时间一层层叠加。
+     */
+    private suspend fun searchCandidates(
+        source: AudioSource,
+        track: PlaylistTrack,
+    ): List<AudioCandidate> = try {
+        when {
+            // 网易云歌单自带歌曲 id，不用再搜一遍
+            source.id == "netease" && track.platformId != null -> listOf(
+                AudioCandidate(
+                    sourceId = "netease",
+                    sourceLabel = "网易云",
+                    songId = track.platformId,
+                    title = track.title,
+                    artist = track.artist,
+                    album = track.album,
+                    durationSec = track.durationSec,
+                    variantTag = TrackMatcher.variantTag(track.title, track.artist),
+                )
+            )
+            else -> source.search(track.title, track.artist, track.durationSec)
+        }
+    } catch (e: Exception) {
+        // 一个源挂了就换下一个，不能连累整首歌
+        Log.w("CM/Resolve", "[${source.id}] 整源搜索失败：${e.message}", e)
+        emptyList()
     }
 
     /**

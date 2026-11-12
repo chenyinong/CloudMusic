@@ -146,7 +146,9 @@ class App : Application() {
                 // 兜底源：网易云酷我都没有的，它能搜到。
                 // 但要绕夸克一圈（分享链接 → 直链），请求多、限流严，所以排最后。
                 quarkSource,
-            )
+            ),
+            // 解析缓存的 key 要带上 Cookie 摘要：换了 Cookie 旧直链就废了
+            quarkCookie = { prefs.quarkCookie },
         )
         playlistStore = PlaylistStore(db)
         playlistImporter = PlaylistTrackImporter(musicSearch)

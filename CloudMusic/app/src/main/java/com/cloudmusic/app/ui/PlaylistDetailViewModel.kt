@@ -224,6 +224,15 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
     /** 在线解析 / 起播的协程，快速切歌时把上一首的活取消掉。 */
     private var onlineJob: Job? = null
 
+    /**
+     * 解析请求的竞态令牌。
+     *
+     * 连点两首歌时，两个解析会同时在跑（cancel 只能作废协程，
+     * 挡不住已经拿到结果、正要改队列的那一步）。晚到的旧结果要是照样
+     * 插进队列，播放头就会跳到不该去的那首 —— 这里只认最后一次。
+     */
+    private var resolveToken = 0
+
     /** 只清行内试听 UI，不动播放队列、也不取消正在跑的起播协程。 */
     private fun clearOnlineUi() {
         onlineLoadingKey = null
@@ -417,6 +426,7 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
         // 第一首若是占位（没下载），先解析出直链再建队列；
         // 解析不出来的占位歌根本不会进媒体队列，播放器也不会去拉空 URL。
         var startFailure: OnlineFailReason? = null
+        val token = ++resolveToken
         queue.getOrNull(startIndex)?.takeIf { it.url.isBlank() }?.let { first ->
             tracks.firstOrNull { it.key == first.key }?.let { saved ->
                 val result = try {
@@ -424,6 +434,8 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
                 } catch (e: Exception) {
                     OnlineResolution(reason = OnlineFailReason.SOURCE_ERROR)
                 }
+                // 这期间用户又点了别的歌：这次的结果作废，别把队列抢走
+                if (token != resolveToken) return
                 // 不论成败都记下来，别让预解析再花几秒重试同一首
                 resolvedKeys.add(first.key)
                 val c = result.candidate
@@ -540,6 +552,8 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
         if (idx < 0) return false
         val saved = tracks.firstOrNull { it.key == savedKey } ?: return false
         onlineJob?.cancel()
+        // 连点两首时只认最后一次：晚到的旧结果不该把播放头抢走
+        val token = ++resolveToken
         onlineJob = viewModelScope.launch {
             onlineLoadingKey = savedKey
             val result = try {
@@ -549,6 +563,8 @@ class PlaylistDetailViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 OnlineResolution()
             }
+            // 这期间用户又点了别的歌：这次的结果作废
+            if (token != resolveToken) return@launch
             // 解析过就记下来，别让预解析再花几秒重试同一首
             resolvedKeys.add(savedKey)
             onlineLoadingKey = null

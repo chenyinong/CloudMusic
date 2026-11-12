@@ -10,6 +10,7 @@ import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
@@ -67,6 +68,19 @@ class MusicService : MediaSessionService() {
 
         val p = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .setLoadControl(
+                // 缓冲策略自己定，别用默认那套 —— 默认要缓冲 2.5 秒才肯出声，
+                // 切歌时这段空白最难受（网盘/OneDrive 的远程文件还要再算建连和首包）。
+                // 这里改成：起播前缓冲 0.8 秒就播，卡了 1.5 秒就能恢复。
+                DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(
+                        /* minBufferMs = */ 15_000,
+                        /* maxBufferMs = */ 50_000,
+                        /* bufferForPlaybackMs = */ 800,
+                        /* bufferForPlaybackAfterRebufferMs = */ 1_500,
+                    )
+                    .build()
+            )
             .build()
 
         p.setAudioAttributes(

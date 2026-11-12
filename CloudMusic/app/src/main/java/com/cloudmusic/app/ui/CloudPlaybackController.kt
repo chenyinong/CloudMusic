@@ -38,6 +38,14 @@ class CloudPlaybackController(
     private var job: Job? = null
     private var scope: CoroutineScope? = null
 
+    /**
+     * 「点了占位歌」的竞态令牌。
+     *
+     * 连点两首时两个解析会同时在跑，晚到的旧结果要是照样插进队列，
+     * 播放头就会跳到不该去的那首 —— 这里只认最后一次。
+     */
+    private var pickToken = 0
+
     /** 播放列表面板点了还没解析的占位歌时接管。 */
     var onUnresolvedPick: ((Track) -> Boolean)? = null
 
@@ -120,9 +128,13 @@ class CloudPlaybackController(
         val idx = order.indexOf(key)
         if (idx < 0) return false
         val sc = scope ?: return false
+        // 连点两首时只认最后一次：晚到的旧结果不该把播放头抢走
+        val token = ++pickToken
         sc.launch {
             resolved.add(key)
             val res = resolver.resolve(t)
+            // 这期间用户又点了别的歌：这次的结果作废
+            if (token != pickToken) return@launch
             val candidate = res.candidate ?: return@launch
             if (candidate.audioUrl.isBlank()) return@launch
             val ready = resolver.toTrack(t, candidate)
